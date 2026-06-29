@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# macOS
+.DS_Store
+
+# Data and outputs
+datasets/custom17/_downloads/
+pretrained_models/
+runs/
+YOLOX_outputs/
