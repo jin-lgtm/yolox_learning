@@ -55,15 +55,37 @@ datasets/custom17/
 ## 1. Install dependencies
 
 ```bash
-pip install -U pip
-pip install -v -e .
-pip install pycocotools opencv-python
+uv venv
+source .venv/bin/activate
 ```
+
+Install PyTorch first.
+
+CUDA 11.8 example:
+
+```bash
+uv pip install --index-url https://download.pytorch.org/whl/cu118 torch torchvision
+```
+
+CPU-only example:
+
+```bash
+uv pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+```
+
+Then install YOLOX and the remaining dependencies:
+
+```bash
+uv pip install --no-build-isolation -e ./upstream_yolox
+uv pip install pycocotools opencv-python tabulate tensorboard
+```
+
+`torch` must be installed before `upstream_yolox`, otherwise editable install fails while building YOLOX ops.
 
 ## 2. Download COCO images, COCO annotations, and YOLOX-Tiny pretrained weights
 
 ```bash
-python custom17/scripts/download_custom17_assets.py
+uv run python custom17/scripts/download_custom17_assets.py
 ```
 
 This downloads:
@@ -77,15 +99,15 @@ This downloads:
 Optional flags:
 
 ```bash
-python custom17/scripts/download_custom17_assets.py --skip-pretrained
-python custom17/scripts/download_custom17_assets.py --skip-images
-python custom17/scripts/download_custom17_assets.py --force
+uv run python custom17/scripts/download_custom17_assets.py --skip-pretrained
+uv run python custom17/scripts/download_custom17_assets.py --skip-images
+uv run python custom17/scripts/download_custom17_assets.py --force
 ```
 
 ## 3. Filter COCO annotations to the target 17 classes and remap ids to 0..16
 
 ```bash
-python custom17/scripts/filter_annotations.py
+uv run python custom17/scripts/filter_annotations.py
 ```
 
 This generates:
@@ -104,7 +126,7 @@ Important behavior:
 If you want to drop empty images:
 
 ```bash
-python custom17/scripts/filter_annotations.py --drop-empty-images
+uv run python custom17/scripts/filter_annotations.py --drop-empty-images
 ```
 
 ## 4. Validate class mapping and bbox integrity
@@ -112,8 +134,8 @@ python custom17/scripts/filter_annotations.py --drop-empty-images
 Run structural validation:
 
 ```bash
-python custom17/scripts/validate_annotations.py --annotation datasets/custom17/annotations/train.json
-python custom17/scripts/validate_annotations.py --annotation datasets/custom17/annotations/val.json
+uv run python custom17/scripts/validate_annotations.py --annotation datasets/custom17/annotations/train.json
+uv run python custom17/scripts/validate_annotations.py --annotation datasets/custom17/annotations/val.json
 ```
 
 This checks:
@@ -130,7 +152,7 @@ This checks:
 Train split visualization:
 
 ```bash
-python custom17/scripts/visualize_annotations.py \
+uv run python custom17/scripts/visualize_annotations.py \
   --annotation datasets/custom17/annotations/train.json \
   --image-dir datasets/custom17/train2017 \
   --output-dir runs/custom17_vis/train \
@@ -140,7 +162,7 @@ python custom17/scripts/visualize_annotations.py \
 Val split visualization:
 
 ```bash
-python custom17/scripts/visualize_annotations.py \
+uv run python custom17/scripts/visualize_annotations.py \
   --annotation datasets/custom17/annotations/val.json \
   --image-dir datasets/custom17/val2017 \
   --output-dir runs/custom17_vis/val \
@@ -180,7 +202,7 @@ Before training, inspect a few rendered samples and verify:
 Single-node multi-GPU example:
 
 ```bash
-python upstream_yolox/tools/train.py \
+uv run python custom17/scripts/train.py \
   -f custom17/exp/yolox_tiny_custom17.py \
   -d 1 \
   -b 32 \
@@ -198,13 +220,14 @@ Notes:
 - classification head shape mismatch during checkpoint load is expected and normal
 - YOLOX handles partial checkpoint loading for fine-tuning with `strict=False`
 - the new 17-class detection head is learned during training
+- `custom17/scripts/train.py` injects `upstream_yolox` into `sys.path`, so you do not need to set `PYTHONPATH` manually
 
 ## 8. Evaluate with low confidence threshold for mAP
 
 Run evaluation with the same experiment file and a low eval confidence threshold:
 
 ```bash
-python upstream_yolox/tools/eval.py \
+uv run python custom17/scripts/eval.py \
   -f custom17/exp/yolox_tiny_custom17.py \
   -d 1 \
   -b 32 \
@@ -243,7 +266,7 @@ For Objects365-based data preparation:
 Example:
 
 ```bash
-python custom17/scripts/filter_annotations.py \
+uv run python custom17/scripts/filter_annotations.py \
   --train-input /path/to/objects365_train.json \
   --val-input /path/to/objects365_val.json
 ```

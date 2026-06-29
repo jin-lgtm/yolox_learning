@@ -26,13 +26,35 @@ Initialize the submodule:
 git submodule update --init --recursive
 ```
 
-Install YOLOX dependencies from the submodule:
+Create a virtual environment with `uv`:
 
 ```bash
-pip install -U pip
-pip install -v -e ./upstream_yolox
-pip install pycocotools opencv-python
+uv venv
+source .venv/bin/activate
 ```
+
+Install PyTorch first, then install YOLOX and the remaining dependencies.
+
+CUDA 11.8 example:
+
+```bash
+uv pip install --index-url https://download.pytorch.org/whl/cu118 torch torchvision
+```
+
+CPU-only example:
+
+```bash
+uv pip install --index-url https://download.pytorch.org/whl/cpu torch torchvision
+```
+
+Then install YOLOX from the submodule:
+
+```bash
+uv pip install --no-build-isolation -e ./upstream_yolox
+uv pip install pycocotools opencv-python tabulate tensorboard
+```
+
+Use `uv run` for scripts in this repository.
 
 ## Custom17 workflow
 
