@@ -23,6 +23,9 @@ COCO_URLS = {
 YOLOX_TINY_COCO_CKPT_URL = (
     "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_tiny.pth"
 )
+YOLOX_NANO_COCO_CKPT_URL = (
+    "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -31,6 +34,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dataset-root", type=Path, default=Path("datasets/custom17"))
     parser.add_argument("--downloads-dir", type=Path, default=None)
     parser.add_argument("--weights-dir", type=Path, default=Path("pretrained_models"))
+    parser.add_argument("--model", choices=("tiny", "nano", "both"), default="tiny")
     parser.add_argument("--skip-images", action="store_true")
     parser.add_argument("--skip-pretrained", action="store_true")
     parser.add_argument("--force", action="store_true")
@@ -231,6 +235,19 @@ def default_objects365_output_name(split: str) -> str:
     return f"objects365_{split}.json"
 
 
+def download_pretrained_weights(model_choice: str, weights_dir: Path, force: bool = False) -> list[Path]:
+    downloaded = []
+    if model_choice in {"tiny", "both"}:
+        tiny_path = weights_dir / "yolox_tiny.pth"
+        download_file(YOLOX_TINY_COCO_CKPT_URL, tiny_path, force=force)
+        downloaded.append(tiny_path)
+    if model_choice in {"nano", "both"}:
+        nano_path = weights_dir / "yolox_nano.pth"
+        download_file(YOLOX_NANO_COCO_CKPT_URL, nano_path, force=force)
+        downloaded.append(nano_path)
+    return downloaded
+
+
 def prepare_coco_assets(dataset_root: Path, downloads_dir: Path, force: bool, skip_images: bool) -> None:
     raw_annotations_dir = dataset_root / "raw_annotations"
     raw_annotations_dir.mkdir(parents=True, exist_ok=True)
@@ -351,16 +368,17 @@ def main() -> None:
     else:
         prepare_objects365_assets(args, dataset_root, downloads_dir)
 
+    downloaded_weights = []
     if not args.skip_pretrained:
-        ckpt_path = weights_dir / "yolox_tiny.pth"
-        download_file(YOLOX_TINY_COCO_CKPT_URL, ckpt_path, force=args.force)
+        downloaded_weights = download_pretrained_weights(args.model, weights_dir, force=args.force)
 
     print(f"[done] Dataset assets are ready for source={args.source}.")
     print(f"        raw annotations: {dataset_root / 'raw_annotations'}")
     print(f"        train images:    {dataset_root / 'train2017'}")
     print(f"        val images:      {dataset_root / 'val2017'}")
-    if not args.skip_pretrained:
-        print(f"        pretrained:      {weights_dir / 'yolox_tiny.pth'}")
+    if downloaded_weights:
+        for ckpt_path in downloaded_weights:
+            print(f"        pretrained:      {ckpt_path}")
 
 
 if __name__ == "__main__":

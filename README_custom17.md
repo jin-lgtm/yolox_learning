@@ -104,7 +104,7 @@ datasets/custom17/
 
 The training Exp only sees the normalized output above. The difference is in how `raw_annotations/` and source images are prepared.
 
-## 3. Download COCO images, COCO annotations, and YOLOX-Tiny pretrained weights
+## 3. Download COCO images, COCO annotations, and pretrained weights
 
 ```bash
 uv run python custom17/scripts/download_custom17_assets.py
@@ -124,6 +124,18 @@ Optional flags:
 uv run python custom17/scripts/download_custom17_assets.py --skip-pretrained
 uv run python custom17/scripts/download_custom17_assets.py --skip-images
 uv run python custom17/scripts/download_custom17_assets.py --force
+```
+
+To download the Nano checkpoint instead:
+
+```bash
+uv run python custom17/scripts/download_custom17_assets.py --model nano
+```
+
+To download both Tiny and Nano checkpoints:
+
+```bash
+uv run python custom17/scripts/download_custom17_assets.py --model both
 ```
 
 ## 4. Download or stage Objects365 assets
