@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Runtime patches for YOLOX evaluation output."""
+"""Runtime patches for YOLOX integration."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from typing import Sequence
 import numpy as np
 from loguru import logger
 from tabulate import tabulate
+import torch
 
 
 def _build_metric_table(metric_by_class, headers, columns=6):
@@ -118,3 +119,18 @@ def patch_coco_evaluator_output() -> None:
 
     coco_eval_module.COCOEvaluator.evaluate_prediction = evaluate_prediction
     coco_eval_module._custom17_ap50_patch_applied = True
+
+
+def patch_torch_load_for_checkpoints() -> None:
+    """Restore pre-2.6 torch.load behavior for trusted YOLOX checkpoints."""
+    if getattr(torch, "_custom17_torch_load_patch_applied", False):
+        return
+
+    original_torch_load = torch.load
+
+    def patched_torch_load(*args, **kwargs):
+        kwargs.setdefault("weights_only", False)
+        return original_torch_load(*args, **kwargs)
+
+    torch.load = patched_torch_load
+    torch._custom17_torch_load_patch_applied = True

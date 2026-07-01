@@ -37,6 +37,7 @@ If these diverge, mAP drops sharply and the first thing to verify is class remap
 - `custom17/scripts/visualize_annotations.py`
 - `custom17/scripts/webcam_demo.py`
 - `custom17/common.py`
+- `custom17/exp/yolox_nano_custom17.py`
 - `custom17/exp/yolox_tiny_custom17.py`
 
 ## Recommended directory layout
@@ -260,9 +261,38 @@ Before training, inspect a few rendered samples and verify:
 - bbox corners are reasonable
 - no obvious class swaps exist, especially `couch`, `tv`, and `cell phone`
 
-## 8. Custom YOLOX-Tiny experiment
+## 8. Custom YOLOX experiments
 
-`custom17/exp/yolox_tiny_custom17.py` is configured as follows:
+Tiny deploy model:
+
+- exp file: `custom17/exp/yolox_tiny_custom17.py`
+- `num_classes = 17`
+- `depth = 0.33`
+- `width = 0.375`
+- `input_size = (640, 640)`
+- `test_size = (640, 640)`
+- `max_epoch = 50`
+- `no_aug_epochs = 10`
+- `warmup_epochs = 3`
+- `mixup_prob = 0.0`
+- `enable_mixup = False`
+- `mosaic_prob = 0.5`
+- `mosaic_scale = (0.8, 1.2)` for weaker mosaic
+- `test_conf = 0.001` for mAP evaluation
+- `eval_interval = 1`
+
+Nano option:
+
+- exp file: `custom17/exp/yolox_nano_custom17.py`
+- `num_classes = 17`
+- `depth = 0.33`
+- `width = 0.25`
+- uses `depthwise=True` backbone/head like standard YOLOX-Nano
+- `input_size = (640, 640)`
+- `test_size = (640, 640)`
+- same dataset, augmentation, and evaluation defaults as the Tiny setup
+
+Tiny settings summary:
 
 - `num_classes = 17`
 - `depth = 0.33`
@@ -283,7 +313,7 @@ Before training, inspect a few rendered samples and verify:
 
 ## 9. Fine-tune from YOLOX-Tiny COCO pretrained weights
 
-Single-node multi-GPU example:
+Tiny single-node example:
 
 ```bash
 uv run python custom17/scripts/train.py \
@@ -295,12 +325,25 @@ uv run python custom17/scripts/train.py \
   -c pretrained_models/yolox_tiny.pth
 ```
 
+Nano single-node example:
+
+```bash
+uv run python custom17/scripts/train.py \
+  -f custom17/exp/yolox_nano_custom17.py \
+  -d 1 \
+  -b 32 \
+  --fp16 \
+  -o \
+  -c /path/to/yolox_nano.pth
+```
+
 CPU-visible GPU count can be adjusted with `-d`.
 
 Notes:
 
 - `--fp16` is supported
 - using a COCO pretrained checkpoint is recommended for this 17-class setup
+- Tiny uses the YOLOX-Tiny checkpoint, Nano should use the YOLOX-Nano checkpoint
 - classification head shape mismatch during checkpoint load is expected and normal
 - YOLOX handles partial checkpoint loading for fine-tuning with `strict=False`
 - the new 17-class detection head is learned during training
@@ -311,6 +354,8 @@ Notes:
 
 Run evaluation with the same experiment file and a low eval confidence threshold:
 
+Tiny:
+
 ```bash
 uv run python custom17/scripts/eval.py \
   -f custom17/exp/yolox_tiny_custom17.py \
@@ -318,6 +363,18 @@ uv run python custom17/scripts/eval.py \
   -b 32 \
   --fp16 \
   -c YOLOX_outputs/yolox_tiny_custom17/best_ckpt.pth \
+  --conf 0.001
+```
+
+Nano:
+
+```bash
+uv run python custom17/scripts/eval.py \
+  -f custom17/exp/yolox_nano_custom17.py \
+  -d 1 \
+  -b 32 \
+  --fp16 \
+  -c YOLOX_outputs/yolox_nano_custom17/best_ckpt.pth \
   --conf 0.001
 ```
 

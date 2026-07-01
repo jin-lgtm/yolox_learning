@@ -23,6 +23,7 @@ if str(YOLOX_ROOT) not in sys.path:
 from yolox.data.data_augment import ValTransform
 from yolox.exp import get_exp
 from yolox.utils import fuse_model, get_model_info, postprocess, vis
+from custom17.runtime_patches import patch_torch_load_for_checkpoints
 
 
 def make_parser():
@@ -95,6 +96,8 @@ class Predictor:
 
 
 def main(exp, args):
+    patch_torch_load_for_checkpoints()
+
     if args.conf is not None:
         exp.test_conf = args.conf
     if args.nms is not None:

@@ -14,7 +14,11 @@ if str(REPO_ROOT) not in sys.path:
 if str(YOLOX_ROOT) not in sys.path:
     sys.path.insert(0, str(YOLOX_ROOT))
 
-from custom17.runtime_patches import patch_coco_evaluator_output
+from custom17.runtime_patches import (
+    patch_coco_evaluator_output,
+    patch_torch_load_for_checkpoints,
+)
 
+patch_torch_load_for_checkpoints()
 patch_coco_evaluator_output()
 runpy.run_path(str(YOLOX_ROOT / "tools" / "train.py"), run_name="__main__")
