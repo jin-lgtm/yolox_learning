@@ -83,7 +83,27 @@ uv pip install pycocotools opencv-python tabulate tensorboard
 
 `torch` must be installed before `upstream_yolox`, otherwise editable install fails while building YOLOX ops.
 
-## 2. Download COCO images, COCO annotations, and YOLOX-Tiny pretrained weights
+## 2. Choose a dataset source
+
+The pipeline supports two raw-data sources:
+
+- `coco`
+- `objects365`
+
+Both are normalized into the same final layout:
+
+```text
+datasets/custom17/
+  annotations/
+    train.json
+    val.json
+  train2017/
+  val2017/
+```
+
+The training Exp only sees the normalized output above. The difference is in how `raw_annotations/` and source images are prepared.
+
+## 3. Download COCO images, COCO annotations, and YOLOX-Tiny pretrained weights
 
 ```bash
 uv run python custom17/scripts/download_custom17_assets.py
@@ -105,7 +125,64 @@ uv run python custom17/scripts/download_custom17_assets.py --skip-images
 uv run python custom17/scripts/download_custom17_assets.py --force
 ```
 
-## 3. Filter COCO annotations to the target 17 classes and remap ids to 0..16
+## 4. Download or stage Objects365 assets
+
+For `Objects365`, use `--source objects365` and pass either URLs or local archive/json paths.
+
+Expected inputs:
+
+- `--train-image-src`
+- `--val-image-src`
+- `--train-ann-src`
+- `--val-ann-src`
+
+These can be:
+
+- direct `http(s)` URLs
+- local archive paths
+- local `.json` annotation files
+
+Example:
+
+```bash
+uv run python custom17/scripts/download_custom17_assets.py \
+  --source objects365 \
+  --train-image-src /data/objects365/train_images.zip \
+  --val-image-src /data/objects365/val_images.zip \
+  --train-ann-src /data/objects365/zhiyuan_objv2_train.json \
+  --val-ann-src /data/objects365/zhiyuan_objv2_val.json \
+  --train-image-strip-prefix train \
+  --val-image-strip-prefix val
+```
+
+If your image archive contains an extra top-level directory, use:
+
+- `--train-image-strip-prefix`
+- `--val-image-strip-prefix`
+
+If your annotation json lives inside a zip or tar, use:
+
+- `--train-ann-member`
+- `--val-ann-member`
+
+You can also provide the Objects365 source paths via environment variables:
+
+```bash
+export OBJECTS365_TRAIN_IMAGE_SRC=/data/objects365/train_images.zip
+export OBJECTS365_VAL_IMAGE_SRC=/data/objects365/val_images.zip
+export OBJECTS365_TRAIN_ANN_SRC=/data/objects365/zhiyuan_objv2_train.json
+export OBJECTS365_VAL_ANN_SRC=/data/objects365/zhiyuan_objv2_val.json
+uv run python custom17/scripts/download_custom17_assets.py --source objects365
+```
+
+The script writes normalized files under:
+
+- `datasets/custom17/raw_annotations/objects365_train.json`
+- `datasets/custom17/raw_annotations/objects365_val.json`
+- `datasets/custom17/train2017/`
+- `datasets/custom17/val2017/`
+
+## 5. Filter source annotations to the target 17 classes and remap ids to 0..16
 
 ```bash
 uv run python custom17/scripts/filter_annotations.py
@@ -130,7 +207,13 @@ If you want to drop empty images:
 uv run python custom17/scripts/filter_annotations.py --drop-empty-images
 ```
 
-## 4. Validate class mapping and bbox integrity
+Objects365 example:
+
+```bash
+uv run python custom17/scripts/filter_annotations.py --source objects365
+```
+
+## 6. Validate class mapping and bbox integrity
 
 Run structural validation:
 
@@ -148,7 +231,7 @@ This checks:
 - bbox boundary warnings are reported
 - per-class instance counts are printed
 
-## 5. Visualize remapped bounding boxes
+## 7. Visualize remapped bounding boxes
 
 Train split visualization:
 
@@ -177,7 +260,7 @@ Before training, inspect a few rendered samples and verify:
 - bbox corners are reasonable
 - no obvious class swaps exist, especially `couch`, `tv`, and `cell phone`
 
-## 6. Custom YOLOX-Tiny experiment
+## 8. Custom YOLOX-Tiny experiment
 
 `custom17/exp/yolox_tiny_custom17.py` is configured as follows:
 
@@ -198,7 +281,7 @@ Before training, inspect a few rendered samples and verify:
 
 `no_aug_epochs` disables mosaic in the final stage through the normal YOLOX training flow.
 
-## 7. Fine-tune from YOLOX-Tiny COCO pretrained weights
+## 9. Fine-tune from YOLOX-Tiny COCO pretrained weights
 
 Single-node multi-GPU example:
 
@@ -224,7 +307,7 @@ Notes:
 - `custom17/scripts/train.py` injects `upstream_yolox` into `sys.path`, so you do not need to set `PYTHONPATH` manually
 - evaluation output now includes both `per class AP` (`AP50:95`) and `per class AP50`
 
-## 8. Evaluate with low confidence threshold for mAP
+## 10. Evaluate with low confidence threshold for mAP
 
 Run evaluation with the same experiment file and a low eval confidence threshold:
 
@@ -253,31 +336,23 @@ If `mAP@0.5` is unexpectedly low, for example around `43`, verify in this order:
 4. bbox format is still COCO `[x, y, w, h]`
 5. eval is run with low `conf`, for example `0.001`
 
-## 9. Objects365 usage
+## 11. Objects365 notes
 
 The filtering code works on generic COCO-style JSON as long as:
 
 - `images`, `annotations`, and `categories` fields exist
 - target class names match the expected names or aliases in `custom17/common.py`
 
-For Objects365-based data preparation:
+For Objects365-based training, make sure:
 
-1. place the raw COCO-style annotation JSON under a local path
-2. update `--train-input` and `--val-input` to those files
-3. run the same filtering script
-4. validate and visualize before training
-
-Example:
-
-```bash
-uv run python custom17/scripts/filter_annotations.py \
-  --train-input /path/to/objects365_train.json \
-  --val-input /path/to/objects365_val.json
-```
+1. the image files extracted under `datasets/custom17/train2017` and `val2017` match the `file_name` fields in the Objects365 json
+2. you run `download_custom17_assets.py --source objects365`
+3. you run `filter_annotations.py --source objects365`
+4. you validate and visualize before training
 
 If your Objects365 export uses slightly different class names, extend the aliases in `custom17/common.py` before filtering.
 
-## 10. Webcam demo
+## 12. Webcam demo
 
 Run a real-time webcam demo with the trained checkpoint:
 
@@ -298,7 +373,7 @@ Useful options:
 - `--save_result` to write an mp4 under `runs/webcam_demo/`
 - press `q` or `Esc` to exit
 
-## 11. Optional teacher-student distillation structure
+## 13. Optional teacher-student distillation structure
 
 Final deployment model should remain `YOLOX-Tiny`. A practical path is:
 

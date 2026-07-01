@@ -25,19 +25,37 @@ from custom17.common import (
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--source", choices=("coco", "objects365"), default="coco")
+    parser.add_argument("--dataset-root", type=Path, default=Path("datasets/custom17"))
     parser.add_argument(
         "--train-input",
         type=Path,
-        default=Path("datasets/custom17/raw_annotations/instances_train2017.json"),
+        default=None,
     )
     parser.add_argument(
         "--val-input",
         type=Path,
-        default=Path("datasets/custom17/raw_annotations/instances_val2017.json"),
+        default=None,
     )
-    parser.add_argument("--output-dir", type=Path, default=Path("datasets/custom17/annotations"))
+    parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--drop-empty-images", action="store_true")
     return parser.parse_args()
+
+
+def resolve_default_annotation_paths(args: argparse.Namespace) -> tuple[Path, Path, Path]:
+    dataset_root = args.dataset_root.resolve()
+    output_dir = (args.output_dir or (dataset_root / "annotations")).resolve()
+    if args.train_input is not None and args.val_input is not None:
+        return args.train_input.resolve(), args.val_input.resolve(), output_dir
+
+    if args.source == "coco":
+        train_input = dataset_root / "raw_annotations" / "instances_train2017.json"
+        val_input = dataset_root / "raw_annotations" / "instances_val2017.json"
+    else:
+        train_input = dataset_root / "raw_annotations" / "objects365_train.json"
+        val_input = dataset_root / "raw_annotations" / "objects365_val.json"
+
+    return train_input.resolve(), val_input.resolve(), output_dir
 
 
 def load_json(path: Path) -> MutableMapping[str, object]:
@@ -119,10 +137,10 @@ def build_filtered_annotations(
 
 def main() -> None:
     args = parse_args()
-    output_dir = args.output_dir.resolve()
+    train_input, val_input, output_dir = resolve_default_annotation_paths(args)
 
-    train_data = load_json(args.train_input.resolve())
-    val_data = load_json(args.val_input.resolve())
+    train_data = load_json(train_input)
+    val_data = load_json(val_input)
 
     train_filtered = build_filtered_annotations(train_data, drop_empty_images=args.drop_empty_images)
     val_filtered = build_filtered_annotations(val_data, drop_empty_images=args.drop_empty_images)
