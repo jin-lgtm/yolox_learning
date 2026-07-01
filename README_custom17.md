@@ -35,6 +35,7 @@ If these diverge, mAP drops sharply and the first thing to verify is class remap
 - `custom17/scripts/filter_annotations.py`
 - `custom17/scripts/validate_annotations.py`
 - `custom17/scripts/visualize_annotations.py`
+- `custom17/scripts/webcam_demo.py`
 - `custom17/common.py`
 - `custom17/exp/yolox_tiny_custom17.py`
 
@@ -221,6 +222,7 @@ Notes:
 - YOLOX handles partial checkpoint loading for fine-tuning with `strict=False`
 - the new 17-class detection head is learned during training
 - `custom17/scripts/train.py` injects `upstream_yolox` into `sys.path`, so you do not need to set `PYTHONPATH` manually
+- evaluation output now includes both `per class AP` (`AP50:95`) and `per class AP50`
 
 ## 8. Evaluate with low confidence threshold for mAP
 
@@ -240,6 +242,8 @@ YOLOX COCO evaluation summary prints both:
 
 - `AP@[IoU=0.50:0.95]`
 - `AP@[IoU=0.50]`
+- `per class AP` as class-wise `AP50:95`
+- `per class AP50` as class-wise `AP@0.5`
 
 If `mAP@0.5` is unexpectedly low, for example around `43`, verify in this order:
 
@@ -273,7 +277,28 @@ uv run python custom17/scripts/filter_annotations.py \
 
 If your Objects365 export uses slightly different class names, extend the aliases in `custom17/common.py` before filtering.
 
-## 10. Optional teacher-student distillation structure
+## 10. Webcam demo
+
+Run a real-time webcam demo with the trained checkpoint:
+
+```bash
+uv run python custom17/scripts/webcam_demo.py \
+  -f custom17/exp/yolox_tiny_custom17.py \
+  -c YOLOX_outputs/yolox_tiny_custom17/best_ckpt.pth \
+  --device gpu \
+  --fp16 \
+  --conf 0.3 \
+  --nms 0.45
+```
+
+Useful options:
+
+- `--camid 0` to choose the webcam device
+- `--device cpu` if GPU is not available
+- `--save_result` to write an mp4 under `runs/webcam_demo/`
+- press `q` or `Esc` to exit
+
+## 11. Optional teacher-student distillation structure
 
 Final deployment model should remain `YOLOX-Tiny`. A practical path is:
 
