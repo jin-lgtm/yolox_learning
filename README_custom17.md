@@ -38,6 +38,7 @@ If these diverge, mAP drops sharply and the first thing to verify is class remap
 - `custom17/scripts/webcam_demo.py`
 - `custom17/scripts/onnx_infer.py`
 - `custom17/scripts/eval_onnx.py`
+- `custom17/scripts/export_onnx.py`
 - `custom17/scripts/export_onnx_fp16.py`
 - `custom17/common.py`
 - `custom17/exp/yolox_nano_custom17.py`
@@ -365,7 +366,7 @@ Notes:
 - the new 17-class detection head is learned during training
 - `custom17/scripts/train.py` injects `upstream_yolox` into `sys.path`, so you do not need to set `PYTHONPATH` manually
 - evaluation output now includes both `per class AP` (`AP50:95`) and `per class AP50`
-- after training ends, `best_ckpt.pth` is automatically exported to `best_ckpt_fp16.onnx`
+- after training ends, `best_ckpt.pth` is automatically exported to `best_ckpt.onnx`
 
 ## 10. Evaluate with low confidence threshold for mAP
 
@@ -452,14 +453,14 @@ Useful options:
 After training finishes, the best checkpoint is automatically exported to:
 
 ```text
-YOLOX_outputs/<exp_name>/best_ckpt_fp16.onnx
+YOLOX_outputs/<exp_name>/best_ckpt.onnx
 ```
 
 Image inference with the exported ONNX:
 
 ```bash
 uv run python custom17/scripts/onnx_infer.py image \
-  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt_fp16.onnx \
+  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt.onnx \
   -f custom17/exp/yolox_tiny_custom17.py \
   --path /path/to/image_or_dir \
   --provider cpu \
@@ -470,7 +471,7 @@ Webcam inference with the exported ONNX:
 
 ```bash
 uv run python custom17/scripts/onnx_infer.py webcam \
-  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt_fp16.onnx \
+  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt.onnx \
   -f custom17/exp/yolox_tiny_custom17.py \
   --provider cpu
 ```
@@ -479,7 +480,7 @@ Video inference with the exported ONNX:
 
 ```bash
 uv run python custom17/scripts/onnx_infer.py video \
-  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt_fp16.onnx \
+  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt.onnx \
   -f custom17/exp/yolox_tiny_custom17.py \
   --path /path/to/video.mp4 \
   --save-result
@@ -489,7 +490,7 @@ COCO-style evaluation with the exported ONNX:
 
 ```bash
 uv run python custom17/scripts/eval_onnx.py \
-  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt_fp16.onnx \
+  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt.onnx \
   -f custom17/exp/yolox_tiny_custom17.py \
   --conf 0.001
 ```
@@ -498,7 +499,7 @@ Nano ONNX evaluation:
 
 ```bash
 uv run python custom17/scripts/eval_onnx.py \
-  -m YOLOX_outputs/yolox_nano_custom17/best_ckpt_fp16.onnx \
+  -m YOLOX_outputs/yolox_nano_custom17/best_ckpt.onnx \
   -f custom17/exp/yolox_nano_custom17.py \
   --conf 0.001
 ```
@@ -513,7 +514,7 @@ The ONNX evaluator prints:
 Manual export from an existing `.pth` checkpoint:
 
 ```bash
-uv run python custom17/scripts/export_onnx_fp16.py \
+uv run python custom17/scripts/export_onnx.py \
   -f custom17/exp/yolox_tiny_custom17.py \
   -c YOLOX_outputs/yolox_tiny_custom17/best_ckpt.pth
 ```
@@ -521,17 +522,21 @@ uv run python custom17/scripts/export_onnx_fp16.py \
 This writes:
 
 ```text
-YOLOX_outputs/yolox_tiny_custom17/best_ckpt_fp16.onnx
+YOLOX_outputs/yolox_tiny_custom17/best_ckpt.onnx
 ```
 
 You can also choose a custom output path:
 
 ```bash
-uv run python custom17/scripts/export_onnx_fp16.py \
+uv run python custom17/scripts/export_onnx.py \
   -f custom17/exp/yolox_nano_custom17.py \
   -c YOLOX_outputs/yolox_nano_custom17/best_ckpt.pth \
-  -o exports/yolox_nano_custom17_fp16.onnx
+  -o exports/yolox_nano_custom17.onnx
 ```
+
+Compatibility note:
+
+- `custom17/scripts/export_onnx_fp16.py` still exists, but now exports standard FP32 ONNX and is deprecated
 
 ## 14. Optional teacher-student distillation structure
 

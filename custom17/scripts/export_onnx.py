@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backward-compatible wrapper for exporting an existing custom17 checkpoint to ONNX."""
+"""Export an existing custom17 checkpoint to ONNX."""
 
 from __future__ import annotations
 
@@ -15,8 +15,6 @@ if str(YOLOX_ROOT) not in sys.path:
     sys.path.insert(0, str(YOLOX_ROOT))
 
 from yolox.exp import get_exp
-
-from loguru import logger
 
 from custom17.runtime_patches import export_ckpt_to_onnx, patch_torch_load_for_checkpoints
 
@@ -47,7 +45,6 @@ def main():
         if args.output is not None
         else ckpt_path.with_suffix(".onnx")
     )
-    logger.warning("export_onnx_fp16.py is deprecated. Exporting standard ONNX instead of FP16 ONNX.")
     export_ckpt_to_onnx(
         exp=exp,
         ckpt_path=ckpt_path,

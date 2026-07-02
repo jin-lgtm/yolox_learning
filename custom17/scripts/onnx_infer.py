@@ -62,6 +62,7 @@ class ONNXPredictor:
         )
         self.session = onnxruntime.InferenceSession(model_path, providers=providers)
         self.input_name = self.session.get_inputs()[0].name
+        self.input_type = self.session.get_inputs()[0].type
         self.test_size = exp.test_size
         self.class_names = getattr(exp, "class_names", None)
         if self.class_names is None:
@@ -69,7 +70,8 @@ class ONNXPredictor:
 
     def inference(self, frame):
         img, ratio = preprocess(frame, self.test_size)
-        ort_inputs = {self.input_name: img[None, :, :, :].astype(np.float16)}
+        dtype = np.float16 if "float16" in self.input_type else np.float32
+        ort_inputs = {self.input_name: img[None, :, :, :].astype(dtype)}
         output = self.session.run(None, ort_inputs)[0]
         predictions = demo_postprocess(output, self.test_size)[0]
         return predictions, ratio

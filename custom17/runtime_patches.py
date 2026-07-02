@@ -138,16 +138,20 @@ def patch_torch_load_for_checkpoints() -> None:
     torch._custom17_torch_load_patch_applied = True
 
 
-def export_best_ckpt_to_fp16_onnx(trainer) -> Path | None:
-    return export_ckpt_to_fp16_onnx(
+def export_best_ckpt_to_onnx(trainer) -> Path | None:
+    return export_ckpt_to_onnx(
         exp=trainer.exp,
         ckpt_path=Path(trainer.file_name) / "best_ckpt.pth",
-        output_path=Path(trainer.file_name) / getattr(trainer.exp, "onnx_export_name", "best_ckpt_fp16.onnx"),
+        output_path=Path(trainer.file_name) / getattr(trainer.exp, "onnx_export_name", "best_ckpt.onnx"),
         device=trainer.device if torch.cuda.is_available() else "cpu",
     )
 
 
-def export_ckpt_to_fp16_onnx(exp, ckpt_path: Path, output_path: Path, device: str = "cpu") -> Path | None:
+def export_best_ckpt_to_fp16_onnx(trainer) -> Path | None:
+    return export_best_ckpt_to_onnx(trainer)
+
+
+def export_ckpt_to_onnx(exp, ckpt_path: Path, output_path: Path, device: str = "cpu") -> Path | None:
     from torch import nn
     from yolox.models.network_blocks import SiLU
     from yolox.utils import replace_module
@@ -161,7 +165,7 @@ def export_ckpt_to_fp16_onnx(exp, ckpt_path: Path, output_path: Path, device: st
     opset_version = int(getattr(exp, "onnx_opset", 11))
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Exporting checkpoint to FP16 ONNX: {}", output_path)
+    logger.info("Exporting checkpoint to ONNX: {}", output_path)
     model = exp.get_model()
     ckpt = torch.load(str(ckpt_path), map_location="cpu")
     state_dict = ckpt["model"] if "model" in ckpt else ckpt
@@ -172,7 +176,6 @@ def export_ckpt_to_fp16_onnx(exp, ckpt_path: Path, output_path: Path, device: st
 
     export_device = device if torch.cuda.is_available() and device != "cpu" else "cpu"
     model.to(export_device)
-    model.half()
 
     dummy_input = torch.randn(
         1,
@@ -180,7 +183,7 @@ def export_ckpt_to_fp16_onnx(exp, ckpt_path: Path, output_path: Path, device: st
         exp.test_size[0],
         exp.test_size[1],
         device=export_device,
-        dtype=torch.float16,
+        dtype=torch.float32,
     )
 
     with torch.no_grad():
@@ -193,8 +196,12 @@ def export_ckpt_to_fp16_onnx(exp, ckpt_path: Path, output_path: Path, device: st
             opset_version=opset_version,
         )
 
-    logger.info("Saved FP16 ONNX model to {}", output_path)
+    logger.info("Saved ONNX model to {}", output_path)
     return output_path
+
+
+def export_ckpt_to_fp16_onnx(exp, ckpt_path: Path, output_path: Path, device: str = "cpu") -> Path | None:
+    return export_ckpt_to_onnx(exp=exp, ckpt_path=ckpt_path, output_path=output_path, device=device)
 
 
 def patch_trainer_for_onnx_export() -> None:
@@ -210,9 +217,9 @@ def patch_trainer_for_onnx_export() -> None:
         if self.rank != 0:
             return
         try:
-            export_best_ckpt_to_fp16_onnx(self)
+            export_best_ckpt_to_onnx(self)
         except Exception:
-            logger.exception("Failed to export best checkpoint to FP16 ONNX")
+            logger.exception("Failed to export best checkpoint to ONNX")
 
     trainer_module.Trainer.after_train = patched_after_train
     trainer_module._custom17_best_onnx_patch_applied = True
