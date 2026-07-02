@@ -37,6 +37,7 @@ If these diverge, mAP drops sharply and the first thing to verify is class remap
 - `custom17/scripts/visualize_annotations.py`
 - `custom17/scripts/webcam_demo.py`
 - `custom17/scripts/onnx_infer.py`
+- `custom17/scripts/eval_onnx.py`
 - `custom17/scripts/export_onnx_fp16.py`
 - `custom17/common.py`
 - `custom17/exp/yolox_nano_custom17.py`
@@ -82,7 +83,7 @@ Then install YOLOX and the remaining dependencies:
 ```bash
 uv pip install --no-build-isolation -e ./upstream_yolox
 uv pip install pycocotools opencv-python tabulate tensorboard
-uv pip install onnx onnxruntime
+uv pip install onnx onnxruntime onnxscript
 ```
 
 `torch` must be installed before `upstream_yolox`, otherwise editable install fails while building YOLOX ops.
@@ -483,6 +484,31 @@ uv run python custom17/scripts/onnx_infer.py video \
   --path /path/to/video.mp4 \
   --save-result
 ```
+
+COCO-style evaluation with the exported ONNX:
+
+```bash
+uv run python custom17/scripts/eval_onnx.py \
+  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt_fp16.onnx \
+  -f custom17/exp/yolox_tiny_custom17.py \
+  --conf 0.001
+```
+
+Nano ONNX evaluation:
+
+```bash
+uv run python custom17/scripts/eval_onnx.py \
+  -m YOLOX_outputs/yolox_nano_custom17/best_ckpt_fp16.onnx \
+  -f custom17/exp/yolox_nano_custom17.py \
+  --conf 0.001
+```
+
+The ONNX evaluator prints:
+
+- `AP@[IoU=0.50:0.95]`
+- `AP@[IoU=0.50]`
+- `per class AP` as class-wise `AP50:95`
+- `per class AP50` as class-wise `AP@0.5`
 
 Manual export from an existing `.pth` checkpoint:
 
