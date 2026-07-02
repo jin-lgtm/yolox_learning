@@ -7,13 +7,15 @@ import contextlib
 import io
 import itertools
 import json
+import os
 import tempfile
+from pathlib import Path
 from typing import Sequence
 
 import numpy as np
 from loguru import logger
-from tabulate import tabulate
 import torch
+from tabulate import tabulate
 
 
 def _build_metric_table(metric_by_class, headers, columns=6):
@@ -134,3 +136,74 @@ def patch_torch_load_for_checkpoints() -> None:
 
     torch.load = patched_torch_load
     torch._custom17_torch_load_patch_applied = True
+
+
+def export_best_ckpt_to_fp16_onnx(trainer) -> Path | None:
+    from torch import nn
+    from yolox.models.network_blocks import SiLU
+    from yolox.utils import replace_module
+
+    best_ckpt_path = Path(trainer.file_name) / "best_ckpt.pth"
+    if not best_ckpt_path.exists():
+        logger.warning("Skip ONNX export because best checkpoint was not found: {}", best_ckpt_path)
+        return None
+
+    output_name = getattr(trainer.exp, "onnx_export_name", "best_ckpt_fp16.onnx")
+    output_path = Path(trainer.file_name) / output_name
+    opset_version = int(getattr(trainer.exp, "onnx_opset", 11))
+
+    logger.info("Exporting best checkpoint to FP16 ONNX: {}", output_path)
+    model = trainer.exp.get_model()
+    ckpt = torch.load(str(best_ckpt_path), map_location="cpu")
+    state_dict = ckpt["model"] if "model" in ckpt else ckpt
+    model.load_state_dict(state_dict)
+    model.eval()
+    model = replace_module(model, nn.SiLU, SiLU)
+    model.head.decode_in_inference = False
+
+    export_device = trainer.device if torch.cuda.is_available() else "cpu"
+    model.to(export_device)
+    model.half()
+
+    dummy_input = torch.randn(
+        1,
+        3,
+        trainer.exp.test_size[0],
+        trainer.exp.test_size[1],
+        device=export_device,
+        dtype=torch.float16,
+    )
+
+    with torch.no_grad():
+        torch.onnx.export(
+            model,
+            dummy_input,
+            str(output_path),
+            input_names=["images"],
+            output_names=["output"],
+            opset_version=opset_version,
+        )
+
+    logger.info("Saved FP16 ONNX model to {}", output_path)
+    return output_path
+
+
+def patch_trainer_for_onnx_export() -> None:
+    from yolox.core import trainer as trainer_module
+
+    if getattr(trainer_module, "_custom17_best_onnx_patch_applied", False):
+        return
+
+    original_after_train = trainer_module.Trainer.after_train
+
+    def patched_after_train(self):
+        original_after_train(self)
+        if self.rank != 0:
+            return
+        try:
+            export_best_ckpt_to_fp16_onnx(self)
+        except Exception:
+            logger.exception("Failed to export best checkpoint to FP16 ONNX")
+
+    trainer_module.Trainer.after_train = patched_after_train
+    trainer_module._custom17_best_onnx_patch_applied = True

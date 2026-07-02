@@ -36,6 +36,7 @@ If these diverge, mAP drops sharply and the first thing to verify is class remap
 - `custom17/scripts/validate_annotations.py`
 - `custom17/scripts/visualize_annotations.py`
 - `custom17/scripts/webcam_demo.py`
+- `custom17/scripts/onnx_infer.py`
 - `custom17/common.py`
 - `custom17/exp/yolox_nano_custom17.py`
 - `custom17/exp/yolox_tiny_custom17.py`
@@ -80,6 +81,7 @@ Then install YOLOX and the remaining dependencies:
 ```bash
 uv pip install --no-build-isolation -e ./upstream_yolox
 uv pip install pycocotools opencv-python tabulate tensorboard
+uv pip install onnx onnxruntime
 ```
 
 `torch` must be installed before `upstream_yolox`, otherwise editable install fails while building YOLOX ops.
@@ -361,6 +363,7 @@ Notes:
 - the new 17-class detection head is learned during training
 - `custom17/scripts/train.py` injects `upstream_yolox` into `sys.path`, so you do not need to set `PYTHONPATH` manually
 - evaluation output now includes both `per class AP` (`AP50:95`) and `per class AP50`
+- after training ends, `best_ckpt.pth` is automatically exported to `best_ckpt_fp16.onnx`
 
 ## 10. Evaluate with low confidence threshold for mAP
 
@@ -442,7 +445,45 @@ Useful options:
 - `--save_result` to write an mp4 under `runs/webcam_demo/`
 - press `q` or `Esc` to exit
 
-## 13. Optional teacher-student distillation structure
+## 13. ONNX inference
+
+After training finishes, the best checkpoint is automatically exported to:
+
+```text
+YOLOX_outputs/<exp_name>/best_ckpt_fp16.onnx
+```
+
+Image inference with the exported ONNX:
+
+```bash
+uv run python custom17/scripts/onnx_infer.py image \
+  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt_fp16.onnx \
+  -f custom17/exp/yolox_tiny_custom17.py \
+  --path /path/to/image_or_dir \
+  --provider cpu \
+  --save-result
+```
+
+Webcam inference with the exported ONNX:
+
+```bash
+uv run python custom17/scripts/onnx_infer.py webcam \
+  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt_fp16.onnx \
+  -f custom17/exp/yolox_tiny_custom17.py \
+  --provider cpu
+```
+
+Video inference with the exported ONNX:
+
+```bash
+uv run python custom17/scripts/onnx_infer.py video \
+  -m YOLOX_outputs/yolox_tiny_custom17/best_ckpt_fp16.onnx \
+  -f custom17/exp/yolox_tiny_custom17.py \
+  --path /path/to/video.mp4 \
+  --save-result
+```
+
+## 14. Optional teacher-student distillation structure
 
 Final deployment model should remain `YOLOX-Tiny`. A practical path is:
 
