@@ -139,37 +139,46 @@ def patch_torch_load_for_checkpoints() -> None:
 
 
 def export_best_ckpt_to_fp16_onnx(trainer) -> Path | None:
+    return export_ckpt_to_fp16_onnx(
+        exp=trainer.exp,
+        ckpt_path=Path(trainer.file_name) / "best_ckpt.pth",
+        output_path=Path(trainer.file_name) / getattr(trainer.exp, "onnx_export_name", "best_ckpt_fp16.onnx"),
+        device=trainer.device if torch.cuda.is_available() else "cpu",
+    )
+
+
+def export_ckpt_to_fp16_onnx(exp, ckpt_path: Path, output_path: Path, device: str = "cpu") -> Path | None:
     from torch import nn
     from yolox.models.network_blocks import SiLU
     from yolox.utils import replace_module
 
-    best_ckpt_path = Path(trainer.file_name) / "best_ckpt.pth"
-    if not best_ckpt_path.exists():
-        logger.warning("Skip ONNX export because best checkpoint was not found: {}", best_ckpt_path)
+    ckpt_path = Path(ckpt_path)
+    output_path = Path(output_path)
+    if not ckpt_path.exists():
+        logger.warning("Skip ONNX export because checkpoint was not found: {}", ckpt_path)
         return None
 
-    output_name = getattr(trainer.exp, "onnx_export_name", "best_ckpt_fp16.onnx")
-    output_path = Path(trainer.file_name) / output_name
-    opset_version = int(getattr(trainer.exp, "onnx_opset", 11))
+    opset_version = int(getattr(exp, "onnx_opset", 11))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Exporting best checkpoint to FP16 ONNX: {}", output_path)
-    model = trainer.exp.get_model()
-    ckpt = torch.load(str(best_ckpt_path), map_location="cpu")
+    logger.info("Exporting checkpoint to FP16 ONNX: {}", output_path)
+    model = exp.get_model()
+    ckpt = torch.load(str(ckpt_path), map_location="cpu")
     state_dict = ckpt["model"] if "model" in ckpt else ckpt
     model.load_state_dict(state_dict)
     model.eval()
     model = replace_module(model, nn.SiLU, SiLU)
     model.head.decode_in_inference = False
 
-    export_device = trainer.device if torch.cuda.is_available() else "cpu"
+    export_device = device if torch.cuda.is_available() and device != "cpu" else "cpu"
     model.to(export_device)
     model.half()
 
     dummy_input = torch.randn(
         1,
         3,
-        trainer.exp.test_size[0],
-        trainer.exp.test_size[1],
+        exp.test_size[0],
+        exp.test_size[1],
         device=export_device,
         dtype=torch.float16,
     )

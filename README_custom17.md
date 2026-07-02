@@ -37,6 +37,7 @@ If these diverge, mAP drops sharply and the first thing to verify is class remap
 - `custom17/scripts/visualize_annotations.py`
 - `custom17/scripts/webcam_demo.py`
 - `custom17/scripts/onnx_infer.py`
+- `custom17/scripts/export_onnx_fp16.py`
 - `custom17/common.py`
 - `custom17/exp/yolox_nano_custom17.py`
 - `custom17/exp/yolox_tiny_custom17.py`
@@ -481,6 +482,29 @@ uv run python custom17/scripts/onnx_infer.py video \
   -f custom17/exp/yolox_tiny_custom17.py \
   --path /path/to/video.mp4 \
   --save-result
+```
+
+Manual export from an existing `.pth` checkpoint:
+
+```bash
+uv run python custom17/scripts/export_onnx_fp16.py \
+  -f custom17/exp/yolox_tiny_custom17.py \
+  -c YOLOX_outputs/yolox_tiny_custom17/best_ckpt.pth
+```
+
+This writes:
+
+```text
+YOLOX_outputs/yolox_tiny_custom17/best_ckpt_fp16.onnx
+```
+
+You can also choose a custom output path:
+
+```bash
+uv run python custom17/scripts/export_onnx_fp16.py \
+  -f custom17/exp/yolox_nano_custom17.py \
+  -c YOLOX_outputs/yolox_nano_custom17/best_ckpt.pth \
+  -o exports/yolox_nano_custom17_fp16.onnx
 ```
 
 ## 14. Optional teacher-student distillation structure
