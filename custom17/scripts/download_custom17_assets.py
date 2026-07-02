@@ -28,6 +28,25 @@ YOLOX_NANO_COCO_CKPT_URL = (
 )
 
 OBJECTS365_PRESETS = {
+    "ultralytics": {
+        "description": "Ultralytics Objects365.yaml public Ksyun patch URLs.",
+        "train_image_src": [
+            f"https://dorc.ks3-cn-beijing.ksyun.com/data-set/2020Objects365%E6%95%B0%E6%8D%AE%E9%9B%86/train/patch{i}.tar.gz"
+            for i in range(51)
+        ],
+        "val_image_src": [
+            *[
+                f"https://dorc.ks3-cn-beijing.ksyun.com/data-set/2020Objects365%E6%95%B0%E6%8D%AE%E9%9B%86/val/images/v1/patch{i}.tar.gz"
+                for i in range(16)
+            ],
+            *[
+                f"https://dorc.ks3-cn-beijing.ksyun.com/data-set/2020Objects365%E6%95%B0%E6%8D%AE%E9%9B%86/val/images/v2/patch{i}.tar.gz"
+                for i in range(16, 44)
+            ],
+        ],
+        "train_ann_src": "https://dorc.ks3-cn-beijing.ksyun.com/data-set/2020Objects365%E6%95%B0%E6%8D%AE%E9%9B%86/train/zhiyuan_objv2_train.tar.gz",
+        "val_ann_src": "https://dorc.ks3-cn-beijing.ksyun.com/data-set/2020Objects365%E6%95%B0%E6%8D%AE%E9%9B%86/val/zhiyuan_objv2_val.json",
+    },
     "community_v2_zip": {
         "description": "Single-archive layout with standard v2 filenames under one base URL.",
         "train_image_src": "train_images.zip",
@@ -106,19 +125,30 @@ def resolve_objects365_sources(args: argparse.Namespace) -> dict[str, str | None
     }
 
     preset_name = args.objects365_preset or os.environ.get("OBJECTS365_PRESET")
+    if (
+        preset_name is None
+        and not any(sources.values())
+        and args.source == "objects365"
+    ):
+        preset_name = "ultralytics"
     if preset_name is None:
         return sources
 
     preset = OBJECTS365_PRESETS[preset_name]
     base_url = args.objects365_base_url or os.environ.get("OBJECTS365_BASE_URL")
-    if not base_url:
+    requires_base_url = preset_name == "community_v2_zip"
+    if requires_base_url and not base_url:
         raise ValueError(
             f"Objects365 preset '{preset_name}' requires --objects365-base-url or OBJECTS365_BASE_URL."
         )
 
     for key in ("train_image_src", "val_image_src", "train_ann_src", "val_ann_src"):
         if sources[key] is None:
-            sources[key] = join_url(base_url, preset[key])
+            preset_value = preset[key]
+            if isinstance(preset_value, list):
+                sources[key] = [join_url(base_url, item) for item in preset_value] if base_url else list(preset_value)
+            else:
+                sources[key] = join_url(base_url, preset_value) if base_url else preset_value
 
     return sources
 
@@ -139,6 +169,22 @@ def stage_source(
         raise FileNotFoundError(f"Source not found: {local_path}")
     print(f"[use-local] {local_path}")
     return local_path
+
+
+def stage_sources(
+    srcs: str | list[str],
+    downloads_dir: Path,
+    default_prefix: str,
+    force: bool = False,
+) -> list[Path]:
+    source_list = [srcs] if isinstance(srcs, str) else list(srcs)
+    staged: list[Path] = []
+    for idx, src in enumerate(source_list):
+        parsed = urlparse(src)
+        guessed_name = Path(parsed.path).name if is_url(src) else Path(src).name
+        default_filename = guessed_name or f"{default_prefix}_{idx}"
+        staged.append(stage_source(src, downloads_dir, default_filename=default_filename, force=force))
+    return staged
 
 
 def normalize_member_path(member_name: str, strip_prefix: str = "") -> Path | None:
@@ -345,18 +391,18 @@ def prepare_objects365_assets(args: argparse.Namespace, dataset_root: Path, down
             "Objects365 source selected but required sources are missing:\n- " + "\n- ".join(missing)
         )
 
-    train_ann_path = stage_source(
+    train_ann_path = stage_sources(
         train_ann_src,
         downloads_dir,
-        default_filename=Path(urlparse(train_ann_src).path).name or "objects365_train_ann",
+        default_prefix="objects365_train_ann",
         force=args.force,
-    )
-    val_ann_path = stage_source(
+    )[0]
+    val_ann_path = stage_sources(
         val_ann_src,
         downloads_dir,
-        default_filename=Path(urlparse(val_ann_src).path).name or "objects365_val_ann",
+        default_prefix="objects365_val_ann",
         force=args.force,
-    )
+    )[0]
     extract_archive_member(
         train_ann_path,
         raw_annotations_dir / (args.train_ann_output_name or default_objects365_output_name("train")),
@@ -373,30 +419,32 @@ def prepare_objects365_assets(args: argparse.Namespace, dataset_root: Path, down
     if args.skip_images:
         return
 
-    train_image_path = stage_source(
+    train_image_paths = stage_sources(
         train_image_src,
         downloads_dir,
-        default_filename=Path(urlparse(train_image_src).path).name or "objects365_train_images",
+        default_prefix="objects365_train_images",
         force=args.force,
     )
-    val_image_path = stage_source(
+    val_image_paths = stage_sources(
         val_image_src,
         downloads_dir,
-        default_filename=Path(urlparse(val_image_src).path).name or "objects365_val_images",
+        default_prefix="objects365_val_images",
         force=args.force,
     )
-    extract_archive_tree(
-        train_image_path,
-        dataset_root / "train2017",
-        strip_prefix=args.train_image_strip_prefix,
-        force=args.force,
-    )
-    extract_archive_tree(
-        val_image_path,
-        dataset_root / "val2017",
-        strip_prefix=args.val_image_strip_prefix,
-        force=args.force,
-    )
+    for train_image_path in train_image_paths:
+        extract_archive_tree(
+            train_image_path,
+            dataset_root / "train2017",
+            strip_prefix=args.train_image_strip_prefix,
+            force=args.force,
+        )
+    for val_image_path in val_image_paths:
+        extract_archive_tree(
+            val_image_path,
+            dataset_root / "val2017",
+            strip_prefix=args.val_image_strip_prefix,
+            force=args.force,
+        )
 
 
 def main() -> None:

@@ -145,7 +145,22 @@ uv run python custom17/scripts/download_custom17_assets.py --model both
 
 ## 4. Download or stage Objects365 assets
 
-For `Objects365`, use `--source objects365` and pass either URLs or local archive/json paths.
+For `Objects365`, the default path now uses the public URLs embedded in Ultralytics `Objects365.yaml`.
+
+Minimal command:
+
+```bash
+uv run python custom17/scripts/download_custom17_assets.py --source objects365
+```
+
+This resolves to the `ultralytics` preset and downloads:
+
+- train annotation tarball `zhiyuan_objv2_train.tar.gz`
+- val annotation json `zhiyuan_objv2_val.json`
+- train image patches `patch0.tar.gz ... patch50.tar.gz`
+- val image patches `patch0.tar.gz ... patch43.tar.gz`
+
+If you want to avoid the default Ultralytics URLs, you can still pass either URLs or local archive/json paths.
 
 Expected inputs:
 
@@ -160,7 +175,7 @@ These can be:
 - local archive paths
 - local `.json` annotation files
 
-If your mirror uses the standard v2 filenames under one base URL, you can use a preset instead of passing four separate sources:
+If your mirror uses the standard v2 filenames under one base URL, you can use the `community_v2_zip` preset instead of passing four separate sources:
 
 ```bash
 uv run python custom17/scripts/download_custom17_assets.py \
@@ -181,6 +196,14 @@ You can also set:
 ```bash
 export OBJECTS365_PRESET=community_v2_zip
 export OBJECTS365_BASE_URL=https://your-mirror.example.com/objects365
+```
+
+To explicitly request the Ultralytics preset:
+
+```bash
+uv run python custom17/scripts/download_custom17_assets.py \
+  --source objects365 \
+  --objects365-preset ultralytics
 ```
 
 Example:
