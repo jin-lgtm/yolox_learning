@@ -27,6 +27,16 @@ YOLOX_NANO_COCO_CKPT_URL = (
     "https://github.com/Megvii-BaseDetection/YOLOX/releases/download/0.1.1rc0/yolox_nano.pth"
 )
 
+OBJECTS365_PRESETS = {
+    "community_v2_zip": {
+        "description": "Single-archive layout with standard v2 filenames under one base URL.",
+        "train_image_src": "train_images.zip",
+        "val_image_src": "val_images.zip",
+        "train_ann_src": "zhiyuan_objv2_train.json",
+        "val_ann_src": "zhiyuan_objv2_val.json",
+    },
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
@@ -42,6 +52,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-image-src", type=str, default=None)
     parser.add_argument("--train-ann-src", type=str, default=None)
     parser.add_argument("--val-ann-src", type=str, default=None)
+    parser.add_argument("--objects365-preset", choices=tuple(OBJECTS365_PRESETS.keys()), default=None)
+    parser.add_argument("--objects365-base-url", type=str, default=None)
     parser.add_argument("--train-image-strip-prefix", type=str, default="")
     parser.add_argument("--val-image-strip-prefix", type=str, default="")
     parser.add_argument("--train-ann-member", type=str, default=None)
@@ -79,6 +91,36 @@ def is_url(value: str) -> bool:
 
 def get_source_value(cli_value: str | None, env_key: str) -> str | None:
     return cli_value or os.environ.get(env_key)
+
+
+def join_url(base_url: str, filename: str) -> str:
+    return base_url.rstrip("/") + "/" + filename.lstrip("/")
+
+
+def resolve_objects365_sources(args: argparse.Namespace) -> dict[str, str | None]:
+    sources = {
+        "train_image_src": get_source_value(args.train_image_src, "OBJECTS365_TRAIN_IMAGE_SRC"),
+        "val_image_src": get_source_value(args.val_image_src, "OBJECTS365_VAL_IMAGE_SRC"),
+        "train_ann_src": get_source_value(args.train_ann_src, "OBJECTS365_TRAIN_ANN_SRC"),
+        "val_ann_src": get_source_value(args.val_ann_src, "OBJECTS365_VAL_ANN_SRC"),
+    }
+
+    preset_name = args.objects365_preset or os.environ.get("OBJECTS365_PRESET")
+    if preset_name is None:
+        return sources
+
+    preset = OBJECTS365_PRESETS[preset_name]
+    base_url = args.objects365_base_url or os.environ.get("OBJECTS365_BASE_URL")
+    if not base_url:
+        raise ValueError(
+            f"Objects365 preset '{preset_name}' requires --objects365-base-url or OBJECTS365_BASE_URL."
+        )
+
+    for key in ("train_image_src", "val_image_src", "train_ann_src", "val_ann_src"):
+        if sources[key] is None:
+            sources[key] = join_url(base_url, preset[key])
+
+    return sources
 
 
 def stage_source(
@@ -282,10 +324,11 @@ def prepare_objects365_assets(args: argparse.Namespace, dataset_root: Path, down
     raw_annotations_dir = dataset_root / "raw_annotations"
     raw_annotations_dir.mkdir(parents=True, exist_ok=True)
 
-    train_image_src = get_source_value(args.train_image_src, "OBJECTS365_TRAIN_IMAGE_SRC")
-    val_image_src = get_source_value(args.val_image_src, "OBJECTS365_VAL_IMAGE_SRC")
-    train_ann_src = get_source_value(args.train_ann_src, "OBJECTS365_TRAIN_ANN_SRC")
-    val_ann_src = get_source_value(args.val_ann_src, "OBJECTS365_VAL_ANN_SRC")
+    resolved_sources = resolve_objects365_sources(args)
+    train_image_src = resolved_sources["train_image_src"]
+    val_image_src = resolved_sources["val_image_src"]
+    train_ann_src = resolved_sources["train_ann_src"]
+    val_ann_src = resolved_sources["val_ann_src"]
 
     missing = []
     if train_ann_src is None:

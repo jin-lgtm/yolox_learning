@@ -160,6 +160,29 @@ These can be:
 - local archive paths
 - local `.json` annotation files
 
+If your mirror uses the standard v2 filenames under one base URL, you can use a preset instead of passing four separate sources:
+
+```bash
+uv run python custom17/scripts/download_custom17_assets.py \
+  --source objects365 \
+  --objects365-preset community_v2_zip \
+  --objects365-base-url https://your-mirror.example.com/objects365
+```
+
+The `community_v2_zip` preset fills these paths under the base URL:
+
+- `train_images.zip`
+- `val_images.zip`
+- `zhiyuan_objv2_train.json`
+- `zhiyuan_objv2_val.json`
+
+You can also set:
+
+```bash
+export OBJECTS365_PRESET=community_v2_zip
+export OBJECTS365_BASE_URL=https://your-mirror.example.com/objects365
+```
+
 Example:
 
 ```bash
