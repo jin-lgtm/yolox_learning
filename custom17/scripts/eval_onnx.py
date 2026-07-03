@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import itertools
 import json
 import sys
 import time
@@ -49,7 +50,7 @@ def make_parser():
 def _build_metric_table(metric_by_class, headers, columns=6):
     num_cols = min(columns, len(metric_by_class) * len(headers))
     result_pair = [x for pair in metric_by_class.items() for x in pair]
-    row_pair = zip(*[result_pair[i::num_cols] for i in range(num_cols)])
+    row_pair = itertools.zip_longest(*[result_pair[i::num_cols] for i in range(num_cols)])
     table_headers = headers * (num_cols // len(headers))
     return tabulate(
         row_pair, tablefmt="pipe", floatfmt=".3f", headers=table_headers, numalign="left"
