@@ -40,6 +40,7 @@ If these diverge, mAP drops sharply and the first thing to verify is class remap
 - `custom17/scripts/eval_onnx.py`
 - `custom17/scripts/export_onnx.py`
 - `custom17/scripts/export_onnx_fp16.py`
+- `custom17/scripts/compare_onnx_models.py`
 - `custom17/common.py`
 - `custom17/exp/yolox_nano_custom17.py`
 - `custom17/exp/yolox_tiny_custom17.py`
@@ -344,6 +345,11 @@ Tiny deploy model:
 - `test_conf = 0.001` for mAP evaluation
 - `eval_interval = 1`
 
+Input size override:
+
+- default is still `640x640`
+- set `CUSTOM17_INPUT_SIZE=512` or `CUSTOM17_INPUT_SIZE=416x416` to train/eval/export with a smaller size using the same exp file
+
 Nano option:
 
 - exp file: `custom17/exp/yolox_nano_custom17.py`
@@ -379,6 +385,7 @@ Tiny settings summary:
 Tiny single-node example:
 
 ```bash
+CUSTOM17_INPUT_SIZE=512 \
 uv run python custom17/scripts/train.py \
   -f custom17/exp/yolox_tiny_custom17.py \
   -d 1 \
@@ -391,6 +398,7 @@ uv run python custom17/scripts/train.py \
 Nano single-node example:
 
 ```bash
+CUSTOM17_INPUT_SIZE=512 \
 uv run python custom17/scripts/train.py \
   -f custom17/exp/yolox_nano_custom17.py \
   -d 1 \
@@ -405,6 +413,7 @@ CPU-visible GPU count can be adjusted with `-d`.
 Notes:
 
 - `--fp16` is supported
+- input size can be overridden per run with `CUSTOM17_INPUT_SIZE`, for example `416`, `512`, or `416x416`
 - using a COCO pretrained checkpoint is recommended for this 17-class setup
 - Tiny uses the YOLOX-Tiny checkpoint, Nano should use the YOLOX-Nano checkpoint
 - classification head shape mismatch during checkpoint load is expected and normal
@@ -583,6 +592,36 @@ uv run python custom17/scripts/export_onnx.py \
 Compatibility note:
 
 - `custom17/scripts/export_onnx_fp16.py` still exists, but now exports standard FP32 ONNX and is deprecated
+
+To compare a previously deployed ONNX against a newly exported ONNX:
+
+```bash
+uv run python custom17/scripts/compare_onnx_models.py \
+  --a /path/to/old_fast.onnx \
+  --b YOLOX_outputs/yolox_tiny_custom17/best_ckpt.onnx
+```
+
+With ORT timing:
+
+```bash
+uv run python custom17/scripts/compare_onnx_models.py \
+  --a /path/to/old_fast.onnx \
+  --b YOLOX_outputs/yolox_tiny_custom17/best_ckpt.onnx \
+  --benchmark \
+  --provider cpu \
+  --warmup 5 \
+  --iterations 30
+```
+
+This prints:
+
+- input/output tensor names, dtypes, and shapes
+- opset imports
+- total node / initializer counts
+- initializer byte sizes
+- op histogram deltas
+- node names that only exist in one graph
+- optional ORT mean/median/min/max inference timing for both models
 
 ## 14. Optional teacher-student distillation structure
 

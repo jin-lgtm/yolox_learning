@@ -14,7 +14,7 @@ if str(YOLOX_ROOT) not in sys.path:
 
 from yolox.exp import Exp as MyExp
 
-from custom17.common import CUSTOM17_CLASSES
+from custom17.common import CUSTOM17_CLASSES, resolve_size_override
 
 
 class Exp(MyExp):
@@ -29,8 +29,9 @@ class Exp(MyExp):
         self.train_ann = "train.json"
         self.val_ann = "val.json"
 
-        self.input_size = (640, 640)
-        self.test_size = (640, 640)
+        resolved_size = resolve_size_override((640, 640))
+        self.input_size = resolved_size
+        self.test_size = resolved_size
         self.multiscale_range = 0
         self.random_size = (20, 20)
 

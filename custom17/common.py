@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Dict, Iterable, List, Mapping, Sequence
 
 
@@ -93,3 +94,23 @@ def categories_match_expected(categories: Sequence[Mapping[str, object]]) -> boo
         if str(observed["name"]) != str(expected["name"]):
             return False
     return True
+
+
+def resolve_size_override(
+    default_size: tuple[int, int],
+    env_key: str = "CUSTOM17_INPUT_SIZE",
+) -> tuple[int, int]:
+    raw = os.environ.get(env_key)
+    if not raw:
+        return default_size
+
+    normalized = raw.lower().replace("x", ",")
+    parts = [part.strip() for part in normalized.split(",") if part.strip()]
+    if len(parts) == 1:
+        side = int(parts[0])
+        return (side, side)
+    if len(parts) == 2:
+        return (int(parts[0]), int(parts[1]))
+    raise ValueError(
+        f"{env_key} must be set as a single integer like '512' or a pair like '512,512'/'512x512'; got: {raw}"
+    )
