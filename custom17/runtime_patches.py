@@ -161,6 +161,8 @@ def patch_mlflow_logger_for_custom17() -> None:
     original_on_train_end = mlflow_logger_module.MlflowLogger.on_train_end
 
     def patched_setup(self, args, exp):
+        if os.getenv("YOLOX_MLFLOW_RUN_NAME") is None:
+            os.environ["YOLOX_MLFLOW_RUN_NAME"] = ""
         original_setup(self, args, exp)
         if not is_main_process() or not getattr(self, "_initialized", False):
             return
