@@ -86,6 +86,7 @@ Then install YOLOX and the remaining dependencies:
 uv pip install --no-build-isolation -e ./upstream_yolox
 uv pip install pycocotools opencv-python tabulate tensorboard
 uv pip install onnx onnxruntime onnxscript
+uv pip install mlflow python-dotenv
 ```
 
 `torch` must be installed before `upstream_yolox`, otherwise editable install fails while building YOLOX ops.
@@ -385,6 +386,10 @@ Tiny settings summary:
 Tiny single-node example:
 
 ```bash
+export MLFLOW_TRACKING_URI=http://your-mlflow-server:5000
+export MLFLOW_EXPERIMENT_NAME=custom17-yolox
+export YOLOX_MLFLOW_RUN_NAME=yolox-tiny-custom17
+
 CUSTOM17_INPUT_SIZE=512 \
 uv run python custom17/scripts/train.py \
   -f custom17/exp/yolox_tiny_custom17.py \
@@ -392,6 +397,7 @@ uv run python custom17/scripts/train.py \
   -b 32 \
   --fp16 \
   -o \
+  --logger mlflow \
   -c pretrained_models/yolox_tiny.pth
 ```
 
@@ -405,6 +411,7 @@ uv run python custom17/scripts/train.py \
   -b 32 \
   --fp16 \
   -o \
+  --logger mlflow \
   -c /path/to/yolox_nano.pth
 ```
 
@@ -422,6 +429,21 @@ Notes:
 - `custom17/scripts/train.py` injects `upstream_yolox` into `sys.path`, so you do not need to set `PYTHONPATH` manually
 - evaluation output now includes both `per class AP` (`AP50:95`) and `per class AP50`
 - after training ends, `best_ckpt.pth` is automatically exported to `best_ckpt.onnx`
+- when `--logger mlflow` is used, metrics are sent to MLflow and the run uploads `best_ckpt.pth`, `best_ckpt.onnx`, `train_log.txt`, and the exp file as artifacts
+
+Useful MLflow environment variables:
+
+- `MLFLOW_TRACKING_URI`
+- `MLFLOW_EXPERIMENT_NAME`
+- `YOLOX_MLFLOW_RUN_NAME`
+- `YOLOX_MLFLOW_LOG_MODEL_ARTIFACTS=1`
+
+`custom17/scripts/train.py` also logs these custom params into MLflow:
+
+- `custom17.num_classes`
+- `custom17.class_names`
+- `custom17.input_override`
+- `custom17.data_source`
 
 ## 10. Evaluate with low confidence threshold for mAP
 

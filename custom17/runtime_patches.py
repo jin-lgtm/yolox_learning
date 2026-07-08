@@ -17,6 +17,8 @@ from loguru import logger
 import torch
 from tabulate import tabulate
 
+from custom17.common import CUSTOM17_CLASSES
+
 
 def _build_metric_table(metric_by_class, headers, columns=6):
     num_cols = min(columns, len(metric_by_class) * len(headers))
@@ -138,6 +140,55 @@ def patch_torch_load_for_checkpoints() -> None:
     torch._custom17_torch_load_patch_applied = True
 
 
+def _log_mlflow_artifact(mlflow_logger, artifact_path: Path, artifact_dir: str) -> None:
+    if not artifact_path.exists():
+        return
+    try:
+        mlflow_logger._ml_flow.log_artifact(str(artifact_path), artifact_dir)
+        logger.info("Logged MLflow artifact: {}", artifact_path)
+    except Exception:
+        logger.exception("Failed to log MLflow artifact: {}", artifact_path)
+
+
+def patch_mlflow_logger_for_custom17() -> None:
+    from yolox.utils import is_main_process
+    import yolox.utils.mlflow_logger as mlflow_logger_module
+
+    if getattr(mlflow_logger_module, "_custom17_mlflow_patch_applied", False):
+        return
+
+    original_setup = mlflow_logger_module.MlflowLogger.setup
+    original_on_train_end = mlflow_logger_module.MlflowLogger.on_train_end
+
+    def patched_setup(self, args, exp):
+        original_setup(self, args, exp)
+        if not is_main_process() or not getattr(self, "_initialized", False):
+            return
+
+        extra_params = {
+            "custom17.num_classes": len(CUSTOM17_CLASSES),
+            "custom17.class_names": json.dumps(list(CUSTOM17_CLASSES), separators=(",", ":")),
+            "custom17.input_override": os.getenv("CUSTOM17_INPUT_SIZE", ""),
+            "custom17.data_source": os.getenv("CUSTOM17_DATA_SOURCE", ""),
+        }
+        self.log_params_mlflow(extra_params)
+
+    def patched_on_train_end(self, args, file_name, metadata):
+        if is_main_process() and getattr(self, "_initialized", False):
+            artifact_dir = args.experiment_name
+            file_dir = Path(file_name)
+            _log_mlflow_artifact(self, file_dir / "best_ckpt.pth", artifact_dir)
+            _log_mlflow_artifact(self, file_dir / "best_ckpt.onnx", artifact_dir)
+            exp_file = getattr(args, "exp_file", None)
+            if exp_file:
+                _log_mlflow_artifact(self, Path(exp_file).resolve(), artifact_dir)
+        return original_on_train_end(self, args, file_name, metadata)
+
+    mlflow_logger_module.MlflowLogger.setup = patched_setup
+    mlflow_logger_module.MlflowLogger.on_train_end = patched_on_train_end
+    mlflow_logger_module._custom17_mlflow_patch_applied = True
+
+
 def export_best_ckpt_to_onnx(trainer) -> Path | None:
     return export_ckpt_to_onnx(
         exp=trainer.exp,
@@ -213,13 +264,12 @@ def patch_trainer_for_onnx_export() -> None:
     original_after_train = trainer_module.Trainer.after_train
 
     def patched_after_train(self):
+        if self.rank == 0:
+            try:
+                export_best_ckpt_to_onnx(self)
+            except Exception:
+                logger.exception("Failed to export best checkpoint to ONNX")
         original_after_train(self)
-        if self.rank != 0:
-            return
-        try:
-            export_best_ckpt_to_onnx(self)
-        except Exception:
-            logger.exception("Failed to export best checkpoint to ONNX")
 
     trainer_module.Trainer.after_train = patched_after_train
     trainer_module._custom17_best_onnx_patch_applied = True
