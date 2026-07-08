@@ -70,8 +70,20 @@ def dump_json(payload: Mapping[str, object], path: Path) -> None:
     print(f"[write] {path}")
 
 
+def normalize_image_file_name(file_name: str, source: str) -> str:
+    if source != "objects365":
+        return file_name
+
+    normalized = file_name.replace("\\", "/").lstrip("./")
+    for prefix in ("images/v1/", "images/v2/"):
+        if normalized.startswith(prefix):
+            return normalized[len(prefix):]
+    return normalized
+
+
 def build_filtered_annotations(
     data: Mapping[str, object],
+    source: str,
     drop_empty_images: bool = False,
 ) -> Dict[str, object]:
     images: Sequence[Mapping[str, object]] = data["images"]  # type: ignore[assignment]
@@ -83,7 +95,12 @@ def build_filtered_annotations(
     if missing:
         raise ValueError(f"Internal class config is invalid, missing names: {missing}")
 
-    image_id_to_image = {int(image["id"]): deepcopy(image) for image in images}
+    image_id_to_image = {}
+    for image in images:
+        copied_image = deepcopy(image)
+        if "file_name" in copied_image:
+            copied_image["file_name"] = normalize_image_file_name(str(copied_image["file_name"]), source)
+        image_id_to_image[int(image["id"])] = copied_image
     kept_annotations: List[Dict[str, object]] = []
     positive_image_ids = set()
     per_class_counter: Counter[str] = Counter()
@@ -142,8 +159,16 @@ def main() -> None:
     train_data = load_json(train_input)
     val_data = load_json(val_input)
 
-    train_filtered = build_filtered_annotations(train_data, drop_empty_images=args.drop_empty_images)
-    val_filtered = build_filtered_annotations(val_data, drop_empty_images=args.drop_empty_images)
+    train_filtered = build_filtered_annotations(
+        train_data,
+        source=args.source,
+        drop_empty_images=args.drop_empty_images,
+    )
+    val_filtered = build_filtered_annotations(
+        val_data,
+        source=args.source,
+        drop_empty_images=args.drop_empty_images,
+    )
 
     dump_json(train_filtered, output_dir / "train.json")
     dump_json(val_filtered, output_dir / "val.json")
