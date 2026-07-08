@@ -39,6 +39,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--drop-empty-images", action="store_true")
+    parser.add_argument("--disable-coco-fallback", action="store_true")
     return parser.parse_args()
 
 
@@ -81,9 +82,18 @@ def normalize_image_file_name(file_name: str, source: str) -> str:
     return normalized
 
 
+def class_counter_from_filtered(data: Mapping[str, object]) -> Counter[str]:
+    counter: Counter[str] = Counter()
+    for ann in data["annotations"]:  # type: ignore[index]
+        class_id = int(ann["category_id"])
+        counter[CUSTOM17_CLASSES[class_id]] += 1
+    return counter
+
+
 def build_filtered_annotations(
     data: Mapping[str, object],
     source: str,
+    allowed_target_category_ids: set[int] | None = None,
     drop_empty_images: bool = False,
 ) -> Dict[str, object]:
     images: Sequence[Mapping[str, object]] = data["images"]  # type: ignore[assignment]
@@ -119,6 +129,8 @@ def build_filtered_annotations(
             continue
 
         target_category_id = source_to_target[source_category_id]
+        if allowed_target_category_ids is not None and target_category_id not in allowed_target_category_ids:
+            continue
         copied = deepcopy(ann)
         copied["id"] = next_ann_id
         copied["category_id"] = target_category_id
@@ -152,9 +164,84 @@ def build_filtered_annotations(
     return filtered
 
 
+def merge_filtered_annotations(
+    primary: Mapping[str, object],
+    fallback: Mapping[str, object],
+) -> Dict[str, object]:
+    merged_images = [deepcopy(image) for image in primary["images"]]  # type: ignore[index]
+    merged_annotations = [deepcopy(ann) for ann in primary["annotations"]]  # type: ignore[index]
+
+    next_image_id = max((int(image["id"]) for image in merged_images), default=0) + 1
+    next_ann_id = max((int(ann["id"]) for ann in merged_annotations), default=0) + 1
+
+    image_id_remap: Dict[int, int] = {}
+    for image in fallback["images"]:  # type: ignore[index]
+        copied_image = deepcopy(image)
+        old_image_id = int(copied_image["id"])
+        copied_image["id"] = next_image_id
+        image_id_remap[old_image_id] = next_image_id
+        merged_images.append(copied_image)
+        next_image_id += 1
+
+    for ann in fallback["annotations"]:  # type: ignore[index]
+        copied_ann = deepcopy(ann)
+        copied_ann["id"] = next_ann_id
+        copied_ann["image_id"] = image_id_remap[int(copied_ann["image_id"])]
+        merged_annotations.append(copied_ann)
+        next_ann_id += 1
+
+    return {
+        "info": deepcopy(primary.get("info", {})),
+        "licenses": deepcopy(primary.get("licenses", [])),
+        "images": merged_images,
+        "annotations": merged_annotations,
+        "categories": deepcopy(EXPECTED_CATEGORIES),
+    }
+
+
+def maybe_apply_coco_fallback(
+    filtered: Mapping[str, object],
+    dataset_root: Path,
+    split: str,
+    disable_coco_fallback: bool,
+) -> Dict[str, object]:
+    if disable_coco_fallback:
+        return dict(filtered)
+
+    class_counter = class_counter_from_filtered(filtered)
+    missing_class_ids = {
+        idx for idx, class_name in enumerate(CUSTOM17_CLASSES) if class_counter[class_name] == 0
+    }
+    if not missing_class_ids:
+        return dict(filtered)
+
+    coco_raw_path = dataset_root / "raw_annotations" / (
+        "instances_train2017.json" if split == "train" else "instances_val2017.json"
+    )
+    if not coco_raw_path.exists():
+        print(
+            f"[warn] Missing COCO fallback annotation for split={split}: {coco_raw_path}. "
+            f"Classes with zero instances remain missing: {[CUSTOM17_CLASSES[idx] for idx in sorted(missing_class_ids)]}"
+        )
+        return dict(filtered)
+
+    print(
+        f"[fallback] split={split} source=coco classes="
+        + ", ".join(CUSTOM17_CLASSES[idx] for idx in sorted(missing_class_ids))
+    )
+    coco_filtered = build_filtered_annotations(
+        load_json(coco_raw_path),
+        source="coco",
+        allowed_target_category_ids=missing_class_ids,
+        drop_empty_images=True,
+    )
+    return merge_filtered_annotations(filtered, coco_filtered)
+
+
 def main() -> None:
     args = parse_args()
     train_input, val_input, output_dir = resolve_default_annotation_paths(args)
+    dataset_root = args.dataset_root.resolve()
 
     train_data = load_json(train_input)
     val_data = load_json(val_input)
@@ -169,6 +256,20 @@ def main() -> None:
         source=args.source,
         drop_empty_images=args.drop_empty_images,
     )
+
+    if args.source == "objects365":
+        train_filtered = maybe_apply_coco_fallback(
+            train_filtered,
+            dataset_root=dataset_root,
+            split="train",
+            disable_coco_fallback=args.disable_coco_fallback,
+        )
+        val_filtered = maybe_apply_coco_fallback(
+            val_filtered,
+            dataset_root=dataset_root,
+            split="val",
+            disable_coco_fallback=args.disable_coco_fallback,
+        )
 
     dump_json(train_filtered, output_dir / "train.json")
     dump_json(val_filtered, output_dir / "val.json")
