@@ -76,10 +76,48 @@ def normalize_image_file_name(file_name: str, source: str) -> str:
         return file_name
 
     normalized = file_name.replace("\\", "/").lstrip("./")
+    return normalized
+
+
+def resolve_image_file_name(file_name: str, source: str, image_root: Path | None = None) -> str:
+    normalized = normalize_image_file_name(file_name, source)
+    if source != "objects365":
+        return normalized
+
+    candidates = [normalized]
     for prefix in ("images/v1/", "images/v2/"):
         if normalized.startswith(prefix):
-            return normalized[len(prefix):]
-    return normalized
+            candidates.append(normalized[len(prefix):])
+
+    seen = set()
+    deduped_candidates = []
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped_candidates.append(candidate)
+
+    if image_root is not None:
+        for candidate in deduped_candidates:
+            if (image_root / candidate).exists():
+                return candidate
+
+    return deduped_candidates[0]
+
+
+def collect_existing_image_ids(
+    image_id_to_image: Mapping[int, Mapping[str, object]],
+    image_root: Path | None,
+) -> set[int]:
+    if image_root is None:
+        return set(image_id_to_image)
+
+    existing_image_ids = set()
+    for image_id, image in image_id_to_image.items():
+        file_name = str(image.get("file_name", ""))
+        if file_name and (image_root / file_name).exists():
+            existing_image_ids.add(image_id)
+    return existing_image_ids
 
 
 def class_counter_from_filtered(data: Mapping[str, object]) -> Counter[str]:
@@ -95,6 +133,8 @@ def build_filtered_annotations(
     source: str,
     allowed_target_category_ids: set[int] | None = None,
     drop_empty_images: bool = False,
+    image_root: Path | None = None,
+    require_existing_images: bool = False,
 ) -> Dict[str, object]:
     images: Sequence[Mapping[str, object]] = data["images"]  # type: ignore[assignment]
     annotations: Iterable[Mapping[str, object]] = data["annotations"]  # type: ignore[assignment]
@@ -109,8 +149,17 @@ def build_filtered_annotations(
     for image in images:
         copied_image = deepcopy(image)
         if "file_name" in copied_image:
-            copied_image["file_name"] = normalize_image_file_name(str(copied_image["file_name"]), source)
+            copied_image["file_name"] = resolve_image_file_name(
+                str(copied_image["file_name"]),
+                source,
+                image_root=image_root,
+            )
         image_id_to_image[int(image["id"])] = copied_image
+    existing_image_ids = (
+        collect_existing_image_ids(image_id_to_image, image_root)
+        if require_existing_images
+        else set(image_id_to_image)
+    )
     kept_annotations: List[Dict[str, object]] = []
     positive_image_ids = set()
     per_class_counter: Counter[str] = Counter()
@@ -139,13 +188,16 @@ def build_filtered_annotations(
         next_ann_id += 1
 
         image_id = int(copied["image_id"])
+        if image_id not in existing_image_ids:
+            continue
         positive_image_ids.add(image_id)
         per_class_counter[CUSTOM17_CLASSES[target_category_id]] += 1
 
     if drop_empty_images:
         kept_images = [image_id_to_image[image_id] for image_id in sorted(positive_image_ids)]
     else:
-        kept_images = [image_id_to_image[image_id] for image_id in sorted(image_id_to_image)]
+        image_ids_to_keep = existing_image_ids if require_existing_images else set(image_id_to_image)
+        kept_images = [image_id_to_image[image_id] for image_id in sorted(image_ids_to_keep)]
 
     filtered = {
         "info": deepcopy(data.get("info", {})),
@@ -229,12 +281,18 @@ def maybe_apply_coco_fallback(
         f"[fallback] split={split} source=coco classes="
         + ", ".join(CUSTOM17_CLASSES[idx] for idx in sorted(missing_class_ids))
     )
+    image_root = dataset_root / ("train2017" if split == "train" else "val2017")
     coco_filtered = build_filtered_annotations(
         load_json(coco_raw_path),
         source="coco",
         allowed_target_category_ids=missing_class_ids,
         drop_empty_images=True,
+        image_root=image_root,
+        require_existing_images=True,
     )
+    if not coco_filtered["annotations"]:  # type: ignore[index]
+        print(f"[fallback-skip] split={split} no matching COCO images found under {image_root}")
+        return dict(filtered)
     return merge_filtered_annotations(filtered, coco_filtered)
 
 
@@ -242,6 +300,8 @@ def main() -> None:
     args = parse_args()
     train_input, val_input, output_dir = resolve_default_annotation_paths(args)
     dataset_root = args.dataset_root.resolve()
+    train_image_root = dataset_root / "train2017"
+    val_image_root = dataset_root / "val2017"
 
     train_data = load_json(train_input)
     val_data = load_json(val_input)
@@ -250,11 +310,13 @@ def main() -> None:
         train_data,
         source=args.source,
         drop_empty_images=args.drop_empty_images,
+        image_root=train_image_root,
     )
     val_filtered = build_filtered_annotations(
         val_data,
         source=args.source,
         drop_empty_images=args.drop_empty_images,
+        image_root=val_image_root,
     )
 
     if args.source == "objects365":
