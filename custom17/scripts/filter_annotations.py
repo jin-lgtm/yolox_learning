@@ -180,6 +180,9 @@ def build_filtered_annotations(
         target_category_id = source_to_target[source_category_id]
         if allowed_target_category_ids is not None and target_category_id not in allowed_target_category_ids:
             continue
+        image_id = int(ann["image_id"])
+        if image_id not in existing_image_ids:
+            continue
         copied = deepcopy(ann)
         copied["id"] = next_ann_id
         copied["category_id"] = target_category_id
@@ -187,9 +190,6 @@ def build_filtered_annotations(
         kept_annotations.append(copied)
         next_ann_id += 1
 
-        image_id = int(copied["image_id"])
-        if image_id not in existing_image_ids:
-            continue
         positive_image_ids.add(image_id)
         per_class_counter[CUSTOM17_CLASSES[target_category_id]] += 1
 
@@ -311,12 +311,14 @@ def main() -> None:
         source=args.source,
         drop_empty_images=args.drop_empty_images,
         image_root=train_image_root,
+        require_existing_images=(args.source == "objects365"),
     )
     val_filtered = build_filtered_annotations(
         val_data,
         source=args.source,
         drop_empty_images=args.drop_empty_images,
         image_root=val_image_root,
+        require_existing_images=(args.source == "objects365"),
     )
 
     if args.source == "objects365":
