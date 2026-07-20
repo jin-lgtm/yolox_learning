@@ -7,7 +7,6 @@ import contextlib
 import io
 import itertools
 import json
-import math
 import os
 import tempfile
 from pathlib import Path
@@ -284,21 +283,25 @@ def patch_trainer_for_balanced_resample_length() -> None:
     if getattr(trainer_module, "_custom17_balanced_len_patch_applied", False):
         return
 
-    def _effective_max_iter(trainer) -> int:
-        return getattr(trainer, "_custom17_effective_max_iter", trainer.max_iter)
-
     original_before_train = trainer_module.Trainer.before_train
     original_train_in_iter = trainer_module.Trainer.train_in_iter
+
+    def _effective_max_iter(trainer) -> int:
+        return getattr(trainer, "_custom17_effective_max_iter", trainer.max_iter)
 
     def patched_before_train(self):
         if os.getenv("CUSTOM17_BALANCED_RESAMPLE", "").strip().lower() in {"1", "true", "yes", "on"}:
             self.exp.balanced_resample = True
             seed_raw = os.getenv("CUSTOM17_BALANCED_RESAMPLE_SEED", "").strip()
+            target_count_raw = os.getenv("CUSTOM17_BALANCED_TARGET_COUNT", "").strip()
             if seed_raw:
                 self.exp.balanced_resample_seed = int(seed_raw)
+            if target_count_raw:
+                self.exp.balanced_target_count = int(target_count_raw)
             logger.info(
-                "Enabled balanced resampling from env before trainer setup: seed={}",
+                "Enabled balanced resampling from env before trainer setup: seed={}, target_count={}",
                 getattr(self.exp, "balanced_resample_seed", 42),
+                getattr(self.exp, "balanced_target_count", None),
             )
         original_before_train(self)
         if not getattr(self.exp, "balanced_resample", False):
@@ -312,27 +315,22 @@ def patch_trainer_for_balanced_resample_length() -> None:
         )
         train_dataset = getattr(self.train_loader, "dataset", None)
         dataset_len = len(train_dataset) if train_dataset is not None else 0
-        effective_batch_size = getattr(batch_sampler, "batch_size", None) or getattr(
-            self.args, "batch_size", 1
-        )
         sampler = getattr(batch_sampler, "sampler", None)
         sampler_len = len(sampler) if sampler is not None else None
         batch_sampler_len = len(batch_sampler)
-        patched_max_iter = batch_sampler_len
-        self.max_iter = patched_max_iter
-        self._custom17_effective_max_iter = patched_max_iter
+        self.max_iter = batch_sampler_len
+        self._custom17_effective_max_iter = batch_sampler_len
         self.lr_scheduler = self.exp.get_lr_scheduler(
             self.exp.basic_lr_per_img * self.args.batch_size, self.max_iter
         )
         if getattr(self, "use_model_ema", False):
             self.ema_model.updates = self.max_iter * self.start_epoch
         logger.info(
-            "Patched max_iter for balanced resampling: {} (dataset_len={}, sampler_len={}, batch_sampler_len={}, effective_batch_size={})",
+            "Balanced subset resampling patched epoch length: max_iter={}, dataset_len={}, sampler_len={}, batch_sampler_len={}",
             self.max_iter,
             dataset_len,
             sampler_len,
             batch_sampler_len,
-            effective_batch_size,
         )
 
     def patched_train_in_iter(self):
@@ -348,7 +346,6 @@ def patch_trainer_for_balanced_resample_length() -> None:
     trainer_module.Trainer.progress_in_iter = property(
         lambda trainer: trainer.epoch * _effective_max_iter(trainer) + trainer.iter
     )
-
     trainer_module.Trainer.before_train = patched_before_train
     trainer_module.Trainer.train_in_iter = patched_train_in_iter
     trainer_module._custom17_balanced_len_patch_applied = True

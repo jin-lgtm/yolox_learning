@@ -14,7 +14,7 @@ from torch.utils.data.sampler import Sampler
 
 
 class BalancedInfiniteSampler(Sampler):
-    """Generate a balanced image subset per epoch, then repeat indefinitely."""
+    """Build a smaller balanced subset each epoch and repeat indefinitely."""
 
     def __init__(
         self,
@@ -25,6 +25,9 @@ class BalancedInfiniteSampler(Sampler):
         world_size: int = 1,
     ) -> None:
         self._image_classes = image_classes
+        self._size = len(image_classes)
+        assert self._size > 0
+        self._target_count = target_count
         self._seed = int(seed)
         if dist.is_available() and dist.is_initialized():
             self._rank = dist.get_rank()
@@ -32,25 +35,24 @@ class BalancedInfiniteSampler(Sampler):
         else:
             self._rank = rank
             self._world_size = world_size
-        self._target_count = target_count
         self._epoch_indices = self._build_epoch_indices(self._seed)
         self._epoch_size = len(self._epoch_indices)
 
     def _build_epoch_indices(self, seed: int) -> list[int]:
         rng = random.Random(seed)
         class_image_counts: Counter[int] = Counter()
-        positive_classes = set()
+        positive_classes: set[int] = set()
         for classes in self._image_classes:
             for class_id in classes:
                 class_image_counts[class_id] += 1
                 positive_classes.add(class_id)
 
         if not positive_classes:
-            return list(range(len(self._image_classes)))
+            return list(range(self._size))
 
         resolved_target = self._target_count or min(class_image_counts[class_id] for class_id in positive_classes)
         selected_counts: Counter[int] = Counter()
-        candidate_indices = list(range(len(self._image_classes)))
+        candidate_indices = list(range(self._size))
         rng.shuffle(candidate_indices)
         candidate_indices.sort(
             key=lambda image_idx: (
@@ -68,7 +70,8 @@ class BalancedInfiniteSampler(Sampler):
                 continue
             selected_indices.append(image_idx)
             for class_id in classes:
-                selected_counts[class_id] += 1
+                if selected_counts[class_id] < resolved_target:
+                    selected_counts[class_id] += 1
             if all(selected_counts[class_id] >= resolved_target for class_id in positive_classes):
                 break
 
@@ -84,7 +87,7 @@ class BalancedInfiniteSampler(Sampler):
             epoch += 1
 
     def __len__(self):
-        return self._epoch_size
+        return self._epoch_size // self._world_size
 
 
 def _collect_image_classes(base_dataset) -> list[set[int]]:
@@ -153,9 +156,15 @@ def build_custom17_train_loader(exp, batch_size, is_distributed, no_aug=False, c
 
     if balanced_resample:
         image_classes = _collect_image_classes(base_dataset)
+        class_image_counts: Counter[int] = Counter()
+        for classes in image_classes:
+            for class_id in classes:
+                class_image_counts[class_id] += 1
+        positive_counts = [count for count in class_image_counts.values() if count > 0]
+        resolved_target = balanced_target_count or (min(positive_counts) if positive_counts else len(base_dataset))
         sampler = BalancedInfiniteSampler(
             image_classes=image_classes,
-            target_count=balanced_target_count,
+            target_count=resolved_target,
             seed=balanced_resample_seed,
         )
         batch_sampler = YoloBatchSampler(
@@ -165,11 +174,13 @@ def build_custom17_train_loader(exp, batch_size, is_distributed, no_aug=False, c
             mosaic=not no_aug,
         )
         logger.info(
-            "Using balanced online resampling for training: epoch_size={}, batches_per_epoch={}, seed={}, target_count={}",
+            "Using balanced subset resampling for training: dataset_size={}, target_count={}, epoch_size_per_rank={}, batches_per_epoch={}, seed={}, class_image_counts={}",
+            len(base_dataset),
+            resolved_target,
             len(sampler),
             len(batch_sampler),
             balanced_resample_seed,
-            balanced_target_count,
+            dict(sorted(class_image_counts.items())),
         )
     else:
         sampler = InfiniteSampler(len(dataset), seed=exp.seed if exp.seed else 0)
