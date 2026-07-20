@@ -4,60 +4,16 @@
 from __future__ import annotations
 
 from collections import Counter
-import math
 import os
 
 import torch
 import torch.distributed as dist
 from loguru import logger
-from torch.utils.data.sampler import BatchSampler, Sampler
-
-
-class BalancedYoloBatchSampler(BatchSampler):
-    """Yield balanced mini-batches with replacement using image-level rarity weights."""
-
-    def __init__(
-        self,
-        weights: torch.Tensor,
-        batch_size: int,
-        epoch_size: int,
-        seed: int = 0,
-        mosaic: bool = True,
-        rank: int = 0,
-        world_size: int = 1,
-    ) -> None:
-        self._weights = weights.to(dtype=torch.double, device="cpu")
-        self.batch_size = int(batch_size)
-        self._epoch_size = int(epoch_size)
-        self._num_batches = math.ceil(self._epoch_size / self.batch_size)
-        self._seed = int(seed)
-        self.mosaic = mosaic
-        if dist.is_available() and dist.is_initialized():
-            self._rank = dist.get_rank()
-            self._world_size = dist.get_world_size()
-        else:
-            self._rank = rank
-            self._world_size = world_size
-
-    def __iter__(self):
-        generator = torch.Generator()
-        generator.manual_seed(self._seed + self._rank)
-        while True:
-            for _ in range(self._num_batches):
-                sampled = torch.multinomial(
-                    self._weights,
-                    self.batch_size,
-                    replacement=True,
-                    generator=generator,
-                )
-                yield [(self.mosaic, idx) for idx in sampled.tolist()]
-
-    def __len__(self):
-        return self._num_batches
+from torch.utils.data.sampler import Sampler
 
 
 class BalancedInfiniteSampler(Sampler):
-    """Backward-compatible balanced sampler that yields single indices."""
+    """Sample image indices with replacement using image-level rarity weights."""
 
     def __init__(
         self,
@@ -172,11 +128,15 @@ def build_custom17_train_loader(exp, batch_size, is_distributed, no_aug=False, c
 
     if balanced_resample:
         weights = _compute_balanced_weights(base_dataset)
-        batch_sampler = BalancedYoloBatchSampler(
+        sampler = BalancedInfiniteSampler(
             weights=weights,
-            batch_size=batch_size,
             epoch_size=len(dataset),
             seed=balanced_resample_seed,
+        )
+        batch_sampler = YoloBatchSampler(
+            sampler=sampler,
+            batch_size=batch_size,
+            drop_last=False,
             mosaic=not no_aug,
         )
         logger.info(
