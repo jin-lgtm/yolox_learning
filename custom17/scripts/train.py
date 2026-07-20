@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import argparse
+import os
 import runpy
 import sys
 from pathlib import Path
@@ -21,6 +23,22 @@ from custom17.runtime_patches import (
     patch_torch_load_for_checkpoints,
 )
 
+
+def apply_custom17_train_args() -> None:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--balanced-resample", action="store_true")
+    parser.add_argument("--balanced-resample-seed", type=int, default=None)
+    args, remaining = parser.parse_known_args(sys.argv[1:])
+
+    if args.balanced_resample:
+        os.environ["CUSTOM17_BALANCED_RESAMPLE"] = "1"
+    if args.balanced_resample_seed is not None:
+        os.environ["CUSTOM17_BALANCED_RESAMPLE_SEED"] = str(args.balanced_resample_seed)
+
+    sys.argv = [sys.argv[0], *remaining]
+
+
+apply_custom17_train_args()
 patch_torch_load_for_checkpoints()
 patch_coco_evaluator_output()
 patch_mlflow_logger_for_custom17()

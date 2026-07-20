@@ -14,7 +14,13 @@ if str(YOLOX_ROOT) not in sys.path:
 
 from yolox.exp import Exp as MyExp
 
-from custom17.common import CUSTOM17_CLASSES, resolve_size_override
+from custom17.common import (
+    CUSTOM17_CLASSES,
+    resolve_bool_env,
+    resolve_int_env,
+    resolve_size_override,
+)
+from custom17.train_loader import build_custom17_train_loader
 
 
 class Exp(MyExp):
@@ -53,5 +59,16 @@ class Exp(MyExp):
         self.basic_lr_per_img = 0.01 / 64.0
         self.test_conf = 0.001
         self.nmsthre = 0.65
+        self.balanced_resample = resolve_bool_env("CUSTOM17_BALANCED_RESAMPLE", False)
+        self.balanced_resample_seed = resolve_int_env("CUSTOM17_BALANCED_RESAMPLE_SEED", 42)
 
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
+
+    def get_data_loader(self, batch_size, is_distributed, no_aug=False, cache_img=None):
+        return build_custom17_train_loader(
+            self,
+            batch_size=batch_size,
+            is_distributed=is_distributed,
+            no_aug=no_aug,
+            cache_img=cache_img,
+        )

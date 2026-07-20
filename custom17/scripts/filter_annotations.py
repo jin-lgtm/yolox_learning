@@ -5,8 +5,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
-from collections import Counter
+from collections import Counter, defaultdict
 from copy import deepcopy
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, MutableMapping, Sequence
@@ -40,6 +41,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--drop-empty-images", action="store_true")
     parser.add_argument("--disable-coco-fallback", action="store_true")
+    parser.add_argument("--balance-train", action="store_true")
+    parser.add_argument("--balance-target-count", type=int, default=None)
+    parser.add_argument("--balance-seed", type=int, default=42)
     return parser.parse_args()
 
 
@@ -296,6 +300,98 @@ def maybe_apply_coco_fallback(
     return merge_filtered_annotations(filtered, coco_filtered)
 
 
+def balance_train_subset(
+    filtered: Mapping[str, object],
+    target_count: int | None = None,
+    seed: int = 42,
+) -> Dict[str, object]:
+    images: Sequence[Mapping[str, object]] = filtered["images"]  # type: ignore[assignment]
+    annotations: Sequence[Mapping[str, object]] = filtered["annotations"]  # type: ignore[assignment]
+    if not images or not annotations:
+        print("[balance] skip because filtered dataset is empty")
+        return dict(filtered)
+
+    original_counts = class_counter_from_filtered(filtered)
+    positive_classes = [name for name in CUSTOM17_CLASSES if original_counts[name] > 0]
+    if not positive_classes:
+        print("[balance] skip because no positive classes were found")
+        return dict(filtered)
+
+    resolved_target = target_count or min(original_counts[name] for name in positive_classes)
+    if resolved_target <= 0:
+        print("[balance] skip because resolved target count is not positive")
+        return dict(filtered)
+
+    image_id_to_image = {int(image["id"]): deepcopy(image) for image in images}
+    anns_by_image: dict[int, list[Mapping[str, object]]] = defaultdict(list)
+    class_ids_by_image: dict[int, set[int]] = defaultdict(set)
+    for ann in annotations:
+        image_id = int(ann["image_id"])
+        anns_by_image[image_id].append(ann)
+        class_ids_by_image[image_id].add(int(ann["category_id"]))
+
+    rng = random.Random(seed)
+    image_ids = list(anns_by_image)
+    rng.shuffle(image_ids)
+    image_ids.sort(
+        key=lambda image_id: (
+            min(original_counts[CUSTOM17_CLASSES[class_id]] for class_id in class_ids_by_image[image_id]),
+            -len(class_ids_by_image[image_id]),
+        )
+    )
+
+    selected_counts: Counter[str] = Counter()
+    selected_image_ids: list[int] = []
+    selected_annotations: list[Dict[str, object]] = []
+
+    def needs_more_examples(image_id: int) -> bool:
+        return any(
+            selected_counts[CUSTOM17_CLASSES[int(ann["category_id"])]] < resolved_target
+            for ann in anns_by_image[image_id]
+        )
+
+    for image_id in image_ids:
+        if not needs_more_examples(image_id):
+            continue
+        selected_image_ids.append(image_id)
+        for ann in anns_by_image[image_id]:
+            copied_ann = deepcopy(ann)
+            selected_annotations.append(copied_ann)
+            selected_counts[CUSTOM17_CLASSES[int(copied_ann["category_id"])]] += 1
+        if all(selected_counts[class_name] >= resolved_target for class_name in positive_classes):
+            break
+
+    selected_images = [image_id_to_image[image_id] for image_id in selected_image_ids]
+    balanced = {
+        "info": deepcopy(filtered.get("info", {})),
+        "licenses": deepcopy(filtered.get("licenses", [])),
+        "images": selected_images,
+        "annotations": selected_annotations,
+        "categories": deepcopy(filtered.get("categories", EXPECTED_CATEGORIES)),
+    }
+
+    print(
+        f"[balance] target_count={resolved_target} seed={seed} "
+        f"images={len(selected_images)} annotations={len(selected_annotations)}"
+    )
+    final_counts = class_counter_from_filtered(balanced)
+    for class_name in CUSTOM17_CLASSES:
+        if original_counts[class_name] == 0:
+            continue
+        print(
+            f"  - {class_name:12s}: original={original_counts[class_name]} balanced={final_counts[class_name]}"
+        )
+    under_target = [class_name for class_name in positive_classes if final_counts[class_name] < resolved_target]
+    if under_target:
+        print(
+            "[balance-warn] unable to hit target for classes: "
+            + ", ".join(
+                f"{class_name}({final_counts[class_name]}/{resolved_target})" for class_name in under_target
+            )
+        )
+    return balanced
+
+
 def main() -> None:
     args = parse_args()
     train_input, val_input, output_dir = resolve_default_annotation_paths(args)
@@ -333,6 +429,13 @@ def main() -> None:
             dataset_root=dataset_root,
             split="val",
             disable_coco_fallback=args.disable_coco_fallback,
+        )
+
+    if args.balance_train:
+        train_filtered = balance_train_subset(
+            train_filtered,
+            target_count=args.balance_target_count,
+            seed=args.balance_seed,
         )
 
     dump_json(train_filtered, output_dir / "train.json")

@@ -279,6 +279,46 @@ Objects365 example:
 uv run python custom17/scripts/filter_annotations.py --source objects365
 ```
 
+Balanced train subset example:
+
+```bash
+uv run python custom17/scripts/filter_annotations.py \
+  --source objects365 \
+  --balance-train
+```
+
+Optional balanced subset controls:
+
+- `--balance-target-count 2000` to cap each positive class around a fixed target count
+- `--balance-seed 123` to change the randomized image sampling order
+
+Notes:
+
+- balancing is applied to `train.json` only; `val.json` is left unchanged
+- balancing is image-level, not annotation-level, so per-class counts are approximate rather than exactly identical
+- if `--balance-target-count` is omitted, the script uses the smallest non-zero class count as the target
+- classes with zero examples stay at zero; balancing does not synthesize missing classes
+
+Online balanced resampling during training:
+
+```bash
+uv run python custom17/scripts/train.py \
+  -f custom17/exp/yolox_tiny_custom17.py \
+  -d 1 \
+  -b 32 \
+  --fp16 \
+  -o \
+  -c pretrained_models/yolox_tiny.pth \
+  --balanced-resample \
+  --balanced-resample-seed 42
+```
+
+Notes:
+
+- this is different from `--balance-train`; it does not rewrite `train.json`
+- instead, each epoch samples a new image-level weighted subset online
+- overrepresented classes keep changing samples across epochs, while rare-class images are sampled more often
+
 ## 6. Validate class mapping and bbox integrity
 
 Run structural validation:

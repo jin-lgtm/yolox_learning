@@ -114,3 +114,17 @@ def resolve_size_override(
     raise ValueError(
         f"{env_key} must be set as a single integer like '512' or a pair like '512,512'/'512x512'; got: {raw}"
     )
+
+
+def resolve_bool_env(env_key: str, default: bool = False) -> bool:
+    raw = os.environ.get(env_key)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def resolve_int_env(env_key: str, default: int) -> int:
+    raw = os.environ.get(env_key)
+    if raw is None or not raw.strip():
+        return default
+    return int(raw)
