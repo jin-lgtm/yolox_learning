@@ -284,6 +284,7 @@ def patch_trainer_for_balanced_resample_length() -> None:
         return
 
     original_before_train = trainer_module.Trainer.before_train
+    original_train_in_iter = trainer_module.Trainer.train_in_iter
 
     def patched_before_train(self):
         original_before_train(self)
@@ -297,7 +298,21 @@ def patch_trainer_for_balanced_resample_length() -> None:
         except TypeError:
             return
         self.max_iter = patched_max_iter
+        self.lr_scheduler = self.exp.get_lr_scheduler(
+            self.exp.basic_lr_per_img * self.args.batch_size, self.max_iter
+        )
+        if getattr(self, "use_model_ema", False):
+            self.ema_model.updates = self.max_iter * self.start_epoch
         logger.info("Patched max_iter for balanced resampling: {}", self.max_iter)
 
+    def patched_train_in_iter(self):
+        if not getattr(self.exp, "balanced_resample", False):
+            return original_train_in_iter(self)
+        for self.iter in range(self.max_iter):
+            self.before_iter()
+            self.train_one_iter()
+            self.after_iter()
+
     trainer_module.Trainer.before_train = patched_before_train
+    trainer_module.Trainer.train_in_iter = patched_train_in_iter
     trainer_module._custom17_balanced_len_patch_applied = True
