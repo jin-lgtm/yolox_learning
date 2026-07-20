@@ -4,16 +4,59 @@
 from __future__ import annotations
 
 from collections import Counter
-import itertools
+import math
 
 import torch
 import torch.distributed as dist
 from loguru import logger
-from torch.utils.data.sampler import Sampler
+from torch.utils.data.sampler import BatchSampler, Sampler
+
+
+class BalancedYoloBatchSampler(BatchSampler):
+    """Yield balanced mini-batches with replacement using image-level rarity weights."""
+
+    def __init__(
+        self,
+        weights: torch.Tensor,
+        batch_size: int,
+        epoch_size: int,
+        seed: int = 0,
+        mosaic: bool = True,
+        rank: int = 0,
+        world_size: int = 1,
+    ) -> None:
+        self._weights = weights.to(dtype=torch.double, device="cpu")
+        self.batch_size = int(batch_size)
+        self._epoch_size = int(epoch_size)
+        self._num_batches = math.ceil(self._epoch_size / self.batch_size)
+        self._seed = int(seed)
+        self.mosaic = mosaic
+        if dist.is_available() and dist.is_initialized():
+            self._rank = dist.get_rank()
+            self._world_size = dist.get_world_size()
+        else:
+            self._rank = rank
+            self._world_size = world_size
+
+    def __iter__(self):
+        generator = torch.Generator()
+        generator.manual_seed(self._seed + self._rank)
+        while True:
+            for _ in range(self._num_batches):
+                sampled = torch.multinomial(
+                    self._weights,
+                    self.batch_size,
+                    replacement=True,
+                    generator=generator,
+                )
+                yield [(self.mosaic, idx) for idx in sampled.tolist()]
+
+    def __len__(self):
+        return self._num_batches
 
 
 class BalancedInfiniteSampler(Sampler):
-    """Sample image indices with replacement using image-level rarity weights."""
+    """Backward-compatible balanced sampler that yields single indices."""
 
     def __init__(
         self,
@@ -34,12 +77,8 @@ class BalancedInfiniteSampler(Sampler):
             self._world_size = world_size
 
     def __iter__(self):
-        start = self._rank
-        yield from itertools.islice(self._infinite_indices(), start, None, self._world_size)
-
-    def _infinite_indices(self):
         generator = torch.Generator()
-        generator.manual_seed(self._seed)
+        generator.manual_seed(self._seed + self._rank)
         while True:
             sampled = torch.multinomial(
                 self._weights,
@@ -50,7 +89,7 @@ class BalancedInfiniteSampler(Sampler):
             yield from sampled.tolist()
 
     def __len__(self):
-        return self._epoch_size // self._world_size
+        return self._epoch_size
 
 
 def _compute_balanced_weights(base_dataset) -> torch.Tensor:
@@ -123,25 +162,27 @@ def build_custom17_train_loader(exp, batch_size, is_distributed, no_aug=False, c
 
     if getattr(exp, "balanced_resample", False):
         weights = _compute_balanced_weights(base_dataset)
-        sampler = BalancedInfiniteSampler(
+        batch_sampler = BalancedYoloBatchSampler(
             weights=weights,
+            batch_size=batch_size,
             epoch_size=len(dataset),
             seed=getattr(exp, "balanced_resample_seed", 42),
+            mosaic=not no_aug,
         )
         logger.info(
-            "Using balanced online resampling for training: epoch_size={}, seed={}",
+            "Using balanced online resampling for training: epoch_size={}, batches_per_epoch={}, seed={}",
             len(dataset),
+            len(batch_sampler),
             getattr(exp, "balanced_resample_seed", 42),
         )
     else:
         sampler = InfiniteSampler(len(dataset), seed=exp.seed if exp.seed else 0)
-
-    batch_sampler = YoloBatchSampler(
-        sampler=sampler,
-        batch_size=batch_size,
-        drop_last=False,
-        mosaic=not no_aug,
-    )
+        batch_sampler = YoloBatchSampler(
+            sampler=sampler,
+            batch_size=batch_size,
+            drop_last=False,
+            mosaic=not no_aug,
+        )
 
     dataloader_kwargs = {"num_workers": exp.data_num_workers, "pin_memory": True}
     dataloader_kwargs["batch_sampler"] = batch_sampler
