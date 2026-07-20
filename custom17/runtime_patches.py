@@ -287,12 +287,25 @@ def patch_trainer_for_balanced_resample_length() -> None:
     original_train_in_iter = trainer_module.Trainer.train_in_iter
 
     def patched_before_train(self):
+        if os.getenv("CUSTOM17_BALANCED_RESAMPLE", "").strip().lower() in {"1", "true", "yes", "on"}:
+            self.exp.balanced_resample = True
+            seed_raw = os.getenv("CUSTOM17_BALANCED_RESAMPLE_SEED", "").strip()
+            if seed_raw:
+                self.exp.balanced_resample_seed = int(seed_raw)
+            logger.info(
+                "Enabled balanced resampling from env before trainer setup: seed={}",
+                getattr(self.exp, "balanced_resample_seed", 42),
+            )
         original_before_train(self)
         if not getattr(self.exp, "balanced_resample", False):
             return
         batch_sampler = getattr(self.train_loader, "batch_sampler", None)
         if batch_sampler is None:
             return
+        logger.info(
+            "Balanced resampling batch sampler in use: {}",
+            type(batch_sampler).__name__,
+        )
         try:
             patched_max_iter = len(batch_sampler)
         except TypeError:

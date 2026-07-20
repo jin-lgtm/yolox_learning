@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections import Counter
 import math
+import os
 
 import torch
 import torch.distributed as dist
@@ -120,6 +121,10 @@ def _compute_balanced_weights(base_dataset) -> torch.Tensor:
     return torch.tensor(weights, dtype=torch.double)
 
 
+def _env_enabled(env_key: str) -> bool:
+    return os.getenv(env_key, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def build_custom17_train_loader(exp, batch_size, is_distributed, no_aug=False, cache_img: str = None):
     from yolox.data import (
         TrainTransform,
@@ -160,20 +165,25 @@ def build_custom17_train_loader(exp, batch_size, is_distributed, no_aug=False, c
     if is_distributed:
         batch_size = batch_size // dist.get_world_size()
 
-    if getattr(exp, "balanced_resample", False):
+    balanced_resample = getattr(exp, "balanced_resample", False) or _env_enabled("CUSTOM17_BALANCED_RESAMPLE")
+    balanced_resample_seed = getattr(exp, "balanced_resample_seed", 42)
+    if os.getenv("CUSTOM17_BALANCED_RESAMPLE_SEED", "").strip():
+        balanced_resample_seed = int(os.getenv("CUSTOM17_BALANCED_RESAMPLE_SEED", "42"))
+
+    if balanced_resample:
         weights = _compute_balanced_weights(base_dataset)
         batch_sampler = BalancedYoloBatchSampler(
             weights=weights,
             batch_size=batch_size,
             epoch_size=len(dataset),
-            seed=getattr(exp, "balanced_resample_seed", 42),
+            seed=balanced_resample_seed,
             mosaic=not no_aug,
         )
         logger.info(
             "Using balanced online resampling for training: epoch_size={}, batches_per_epoch={}, seed={}",
             len(dataset),
             len(batch_sampler),
-            getattr(exp, "balanced_resample_seed", 42),
+            balanced_resample_seed,
         )
     else:
         sampler = InfiniteSampler(len(dataset), seed=exp.seed if exp.seed else 0)
