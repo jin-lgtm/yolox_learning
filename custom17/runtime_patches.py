@@ -275,3 +275,29 @@ def patch_trainer_for_onnx_export() -> None:
 
     trainer_module.Trainer.after_train = patched_after_train
     trainer_module._custom17_best_onnx_patch_applied = True
+
+
+def patch_trainer_for_balanced_resample_length() -> None:
+    from yolox.core import trainer as trainer_module
+
+    if getattr(trainer_module, "_custom17_balanced_len_patch_applied", False):
+        return
+
+    original_before_train = trainer_module.Trainer.before_train
+
+    def patched_before_train(self):
+        original_before_train(self)
+        if not getattr(self.exp, "balanced_resample", False):
+            return
+        batch_sampler = getattr(self.train_loader, "batch_sampler", None)
+        if batch_sampler is None:
+            return
+        try:
+            patched_max_iter = len(batch_sampler)
+        except TypeError:
+            return
+        self.max_iter = patched_max_iter
+        logger.info("Patched max_iter for balanced resampling: {}", self.max_iter)
+
+    trainer_module.Trainer.before_train = patched_before_train
+    trainer_module._custom17_balanced_len_patch_applied = True
