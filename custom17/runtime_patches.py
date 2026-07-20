@@ -284,9 +284,11 @@ def patch_trainer_for_balanced_resample_length() -> None:
     if getattr(trainer_module, "_custom17_balanced_len_patch_applied", False):
         return
 
+    def _effective_max_iter(trainer) -> int:
+        return getattr(trainer, "_custom17_effective_max_iter", trainer.max_iter)
+
     original_before_train = trainer_module.Trainer.before_train
     original_train_in_iter = trainer_module.Trainer.train_in_iter
-    original_after_iter = trainer_module.Trainer.after_iter
 
     def patched_before_train(self):
         if os.getenv("CUSTOM17_BALANCED_RESAMPLE", "").strip().lower() in {"1", "true", "yes", "on"}:
@@ -331,19 +333,17 @@ def patch_trainer_for_balanced_resample_length() -> None:
     def patched_train_in_iter(self):
         if not getattr(self.exp, "balanced_resample", False):
             return original_train_in_iter(self)
-        effective_max_iter = getattr(self, "_custom17_effective_max_iter", self.max_iter)
-        self.max_iter = effective_max_iter
+        effective_max_iter = _effective_max_iter(self)
         for self.iter in range(effective_max_iter):
+            self.max_iter = effective_max_iter
             self.before_iter()
             self.train_one_iter()
             self.after_iter()
 
-    def patched_after_iter(self):
-        if getattr(self.exp, "balanced_resample", False):
-            self.max_iter = getattr(self, "_custom17_effective_max_iter", self.max_iter)
-        return original_after_iter(self)
+    trainer_module.Trainer.progress_in_iter = property(
+        lambda trainer: trainer.epoch * _effective_max_iter(trainer) + trainer.iter
+    )
 
     trainer_module.Trainer.before_train = patched_before_train
     trainer_module.Trainer.train_in_iter = patched_train_in_iter
-    trainer_module.Trainer.after_iter = patched_after_iter
     trainer_module._custom17_balanced_len_patch_applied = True

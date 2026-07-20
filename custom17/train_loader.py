@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from collections import Counter
 import os
+import random
 
 import torch
 import torch.distributed as dist
@@ -13,18 +14,17 @@ from torch.utils.data.sampler import Sampler
 
 
 class BalancedInfiniteSampler(Sampler):
-    """Sample image indices with replacement using image-level rarity weights."""
+    """Generate a balanced image subset per epoch, then repeat indefinitely."""
 
     def __init__(
         self,
-        weights: torch.Tensor,
-        epoch_size: int,
+        image_classes: list[set[int]],
+        target_count: int | None,
         seed: int = 0,
         rank: int = 0,
         world_size: int = 1,
     ) -> None:
-        self._weights = weights.to(dtype=torch.double, device="cpu")
-        self._epoch_size = int(epoch_size)
+        self._image_classes = image_classes
         self._seed = int(seed)
         if dist.is_available() and dist.is_initialized():
             self._rank = dist.get_rank()
@@ -32,25 +32,62 @@ class BalancedInfiniteSampler(Sampler):
         else:
             self._rank = rank
             self._world_size = world_size
+        self._target_count = target_count
+        self._epoch_indices = self._build_epoch_indices(self._seed)
+        self._epoch_size = len(self._epoch_indices)
+
+    def _build_epoch_indices(self, seed: int) -> list[int]:
+        rng = random.Random(seed)
+        class_image_counts: Counter[int] = Counter()
+        positive_classes = set()
+        for classes in self._image_classes:
+            for class_id in classes:
+                class_image_counts[class_id] += 1
+                positive_classes.add(class_id)
+
+        if not positive_classes:
+            return list(range(len(self._image_classes)))
+
+        resolved_target = self._target_count or min(class_image_counts[class_id] for class_id in positive_classes)
+        selected_counts: Counter[int] = Counter()
+        candidate_indices = list(range(len(self._image_classes)))
+        rng.shuffle(candidate_indices)
+        candidate_indices.sort(
+            key=lambda image_idx: (
+                min((class_image_counts[class_id] for class_id in self._image_classes[image_idx]), default=10**9),
+                -len(self._image_classes[image_idx]),
+            )
+        )
+
+        selected_indices: list[int] = []
+        for image_idx in candidate_indices:
+            classes = self._image_classes[image_idx]
+            if not classes:
+                continue
+            if not any(selected_counts[class_id] < resolved_target for class_id in classes):
+                continue
+            selected_indices.append(image_idx)
+            for class_id in classes:
+                selected_counts[class_id] += 1
+            if all(selected_counts[class_id] >= resolved_target for class_id in positive_classes):
+                break
+
+        if not selected_indices:
+            return candidate_indices
+        return selected_indices
 
     def __iter__(self):
-        generator = torch.Generator()
-        generator.manual_seed(self._seed + self._rank)
+        epoch = 0
         while True:
-            sampled = torch.multinomial(
-                self._weights,
-                self._epoch_size,
-                replacement=True,
-                generator=generator,
-            )
-            yield from sampled.tolist()
+            epoch_indices = self._epoch_indices if epoch == 0 else self._build_epoch_indices(self._seed + epoch)
+            yield from epoch_indices[self._rank :: self._world_size]
+            epoch += 1
 
     def __len__(self):
         return self._epoch_size
 
 
-def _compute_balanced_weights(base_dataset) -> torch.Tensor:
-    class_counts: Counter[int] = Counter()
+def _collect_image_classes(base_dataset) -> list[set[int]]:
     image_classes: list[set[int]] = []
 
     for labels, *_ in base_dataset.annotations:
@@ -59,22 +96,7 @@ def _compute_balanced_weights(base_dataset) -> torch.Tensor:
         else:
             classes = {int(class_id) for class_id in labels[:, 4].tolist()}
         image_classes.append(classes)
-        for class_id in classes:
-            class_counts[class_id] += 1
-
-    if not class_counts:
-        return torch.ones(len(image_classes), dtype=torch.double)
-
-    min_positive_weight = min(1.0 / count for count in class_counts.values() if count > 0)
-    negative_weight = min_positive_weight * 0.5
-    weights = []
-    for classes in image_classes:
-        if classes:
-            weight = max(1.0 / class_counts[class_id] for class_id in classes)
-        else:
-            weight = negative_weight
-        weights.append(weight)
-    return torch.tensor(weights, dtype=torch.double)
+    return image_classes
 
 
 def _env_enabled(env_key: str) -> bool:
@@ -123,14 +145,17 @@ def build_custom17_train_loader(exp, batch_size, is_distributed, no_aug=False, c
 
     balanced_resample = getattr(exp, "balanced_resample", False) or _env_enabled("CUSTOM17_BALANCED_RESAMPLE")
     balanced_resample_seed = getattr(exp, "balanced_resample_seed", 42)
+    balanced_target_count = getattr(exp, "balanced_target_count", None)
     if os.getenv("CUSTOM17_BALANCED_RESAMPLE_SEED", "").strip():
         balanced_resample_seed = int(os.getenv("CUSTOM17_BALANCED_RESAMPLE_SEED", "42"))
+    if os.getenv("CUSTOM17_BALANCED_TARGET_COUNT", "").strip():
+        balanced_target_count = int(os.getenv("CUSTOM17_BALANCED_TARGET_COUNT", "0")) or None
 
     if balanced_resample:
-        weights = _compute_balanced_weights(base_dataset)
+        image_classes = _collect_image_classes(base_dataset)
         sampler = BalancedInfiniteSampler(
-            weights=weights,
-            epoch_size=len(dataset),
+            image_classes=image_classes,
+            target_count=balanced_target_count,
             seed=balanced_resample_seed,
         )
         batch_sampler = YoloBatchSampler(
@@ -140,10 +165,11 @@ def build_custom17_train_loader(exp, batch_size, is_distributed, no_aug=False, c
             mosaic=not no_aug,
         )
         logger.info(
-            "Using balanced online resampling for training: epoch_size={}, batches_per_epoch={}, seed={}",
-            len(dataset),
+            "Using balanced online resampling for training: epoch_size={}, batches_per_epoch={}, seed={}, target_count={}",
+            len(sampler),
             len(batch_sampler),
             balanced_resample_seed,
+            balanced_target_count,
         )
     else:
         sampler = InfiniteSampler(len(dataset), seed=exp.seed if exp.seed else 0)

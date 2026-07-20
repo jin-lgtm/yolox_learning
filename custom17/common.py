@@ -128,3 +128,10 @@ def resolve_int_env(env_key: str, default: int) -> int:
     if raw is None or not raw.strip():
         return default
     return int(raw)
+
+
+def resolve_optional_int_env(env_key: str) -> int | None:
+    raw = os.environ.get(env_key)
+    if raw is None or not raw.strip():
+        return None
+    return int(raw)

@@ -20,6 +20,7 @@ from custom17.common import (
     CUSTOM17_CLASSES,
     resolve_bool_env,
     resolve_int_env,
+    resolve_optional_int_env,
     resolve_size_override,
 )
 from custom17.train_loader import build_custom17_train_loader
@@ -63,6 +64,7 @@ class Exp(MyExp):
         self.nmsthre = 0.65
         self.balanced_resample = resolve_bool_env("CUSTOM17_BALANCED_RESAMPLE", False)
         self.balanced_resample_seed = resolve_int_env("CUSTOM17_BALANCED_RESAMPLE_SEED", 42)
+        self.balanced_target_count = resolve_optional_int_env("CUSTOM17_BALANCED_TARGET_COUNT")
 
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
 

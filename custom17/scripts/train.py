@@ -29,12 +29,15 @@ def apply_custom17_train_args() -> None:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--balanced-resample", action="store_true")
     parser.add_argument("--balanced-resample-seed", type=int, default=None)
+    parser.add_argument("--balanced-target-count", type=int, default=None)
     args, remaining = parser.parse_known_args(sys.argv[1:])
 
     if args.balanced_resample:
         os.environ["CUSTOM17_BALANCED_RESAMPLE"] = "1"
     if args.balanced_resample_seed is not None:
         os.environ["CUSTOM17_BALANCED_RESAMPLE_SEED"] = str(args.balanced_resample_seed)
+    if args.balanced_target_count is not None:
+        os.environ["CUSTOM17_BALANCED_TARGET_COUNT"] = str(args.balanced_target_count)
 
     sys.argv = [sys.argv[0], *remaining]
 
