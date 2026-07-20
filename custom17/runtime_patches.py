@@ -315,7 +315,10 @@ def patch_trainer_for_balanced_resample_length() -> None:
         effective_batch_size = getattr(batch_sampler, "batch_size", None) or getattr(
             self.args, "batch_size", 1
         )
-        patched_max_iter = math.ceil(dataset_len / max(int(effective_batch_size), 1))
+        sampler = getattr(batch_sampler, "sampler", None)
+        sampler_len = len(sampler) if sampler is not None else None
+        batch_sampler_len = len(batch_sampler)
+        patched_max_iter = batch_sampler_len
         self.max_iter = patched_max_iter
         self._custom17_effective_max_iter = patched_max_iter
         self.lr_scheduler = self.exp.get_lr_scheduler(
@@ -324,9 +327,11 @@ def patch_trainer_for_balanced_resample_length() -> None:
         if getattr(self, "use_model_ema", False):
             self.ema_model.updates = self.max_iter * self.start_epoch
         logger.info(
-            "Patched max_iter for balanced resampling: {} (dataset_len={}, effective_batch_size={})",
+            "Patched max_iter for balanced resampling: {} (dataset_len={}, sampler_len={}, batch_sampler_len={}, effective_batch_size={})",
             self.max_iter,
             dataset_len,
+            sampler_len,
+            batch_sampler_len,
             effective_batch_size,
         )
 
