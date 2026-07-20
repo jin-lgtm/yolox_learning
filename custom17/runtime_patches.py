@@ -7,6 +7,7 @@ import contextlib
 import io
 import itertools
 import json
+import math
 import os
 import tempfile
 from pathlib import Path
@@ -306,17 +307,24 @@ def patch_trainer_for_balanced_resample_length() -> None:
             "Balanced resampling batch sampler in use: {}",
             type(batch_sampler).__name__,
         )
-        try:
-            patched_max_iter = len(batch_sampler)
-        except TypeError:
-            return
+        train_dataset = getattr(self.train_loader, "dataset", None)
+        dataset_len = len(train_dataset) if train_dataset is not None else 0
+        effective_batch_size = getattr(batch_sampler, "batch_size", None) or getattr(
+            self.args, "batch_size", 1
+        )
+        patched_max_iter = math.ceil(dataset_len / max(int(effective_batch_size), 1))
         self.max_iter = patched_max_iter
         self.lr_scheduler = self.exp.get_lr_scheduler(
             self.exp.basic_lr_per_img * self.args.batch_size, self.max_iter
         )
         if getattr(self, "use_model_ema", False):
             self.ema_model.updates = self.max_iter * self.start_epoch
-        logger.info("Patched max_iter for balanced resampling: {}", self.max_iter)
+        logger.info(
+            "Patched max_iter for balanced resampling: {} (dataset_len={}, effective_batch_size={})",
+            self.max_iter,
+            dataset_len,
+            effective_batch_size,
+        )
 
     def patched_train_in_iter(self):
         if not getattr(self.exp, "balanced_resample", False):
