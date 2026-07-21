@@ -167,18 +167,12 @@ def build_filtered_annotations(
     kept_annotations: List[Dict[str, object]] = []
     positive_image_ids = set()
     per_class_counter: Counter[str] = Counter()
+    clipped_bbox_count = 0
 
     next_ann_id = 1
     for ann in annotations:
         source_category_id = int(ann["category_id"])
         if source_category_id not in source_to_target:
-            continue
-
-        bbox = ann.get("bbox", None)
-        if not isinstance(bbox, list) or len(bbox) != 4:
-            continue
-        _, _, width, height = bbox
-        if float(width) <= 0 or float(height) <= 0:
             continue
 
         target_category_id = source_to_target[source_category_id]
@@ -187,10 +181,34 @@ def build_filtered_annotations(
         image_id = int(ann["image_id"])
         if image_id not in existing_image_ids:
             continue
+        bbox = ann.get("bbox", None)
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            continue
+        image_meta = image_id_to_image.get(image_id)
+        if image_meta is None:
+            continue
+        img_w = float(image_meta["width"])
+        img_h = float(image_meta["height"])
+        x, y, width, height = map(float, bbox)
+        if width <= 0 or height <= 0:
+            continue
+
+        x1 = max(0.0, x)
+        y1 = max(0.0, y)
+        x2 = min(img_w, x + width)
+        y2 = min(img_h, y + height)
+        clipped_width = x2 - x1
+        clipped_height = y2 - y1
+        if clipped_width <= 0 or clipped_height <= 0:
+            continue
+        if x1 != x or y1 != y or clipped_width != width or clipped_height != height:
+            clipped_bbox_count += 1
+
         copied = deepcopy(ann)
         copied["id"] = next_ann_id
         copied["category_id"] = target_category_id
-        copied["area"] = float(width) * float(height)
+        copied["bbox"] = [x1, y1, clipped_width, clipped_height]
+        copied["area"] = clipped_width * clipped_height
         kept_annotations.append(copied)
         next_ann_id += 1
 
@@ -213,7 +231,7 @@ def build_filtered_annotations(
 
     print(
         f"[summary] images={len(kept_images)} annotations={len(kept_annotations)} "
-        f"drop_empty_images={drop_empty_images}"
+        f"drop_empty_images={drop_empty_images} clipped_bboxes={clipped_bbox_count}"
     )
     for class_name in CUSTOM17_CLASSES:
         print(f"  - {class_name:12s}: {per_class_counter[class_name]}")
