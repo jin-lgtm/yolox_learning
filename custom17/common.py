@@ -130,6 +130,13 @@ def resolve_int_env(env_key: str, default: int) -> int:
     return int(raw)
 
 
+def resolve_float_env(env_key: str, default: float) -> float:
+    raw = os.environ.get(env_key)
+    if raw is None or not raw.strip():
+        return default
+    return float(raw)
+
+
 def resolve_optional_int_env(env_key: str) -> int | None:
     raw = os.environ.get(env_key)
     if raw is None or not raw.strip():
