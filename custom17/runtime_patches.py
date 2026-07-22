@@ -104,23 +104,24 @@ def patch_coco_evaluator_output() -> None:
         coco_eval = COCOeval(coco_gt, coco_dt, ann_type[1])
         coco_eval.evaluate()
         coco_eval.accumulate()
-        self._custom17_last_coco_stats = {
-            "ap50_95": float(coco_eval.stats[0]),
-            "ap50": float(coco_eval.stats[1]),
-            "ap75": float(coco_eval.stats[2]),
-            "ap_small": float(coco_eval.stats[3]),
-            "ap_medium": float(coco_eval.stats[4]),
-            "ap_large": float(coco_eval.stats[5]),
-            "ar_max1": float(coco_eval.stats[6]),
-            "ar_max10": float(coco_eval.stats[7]),
-            "ar_max100": float(coco_eval.stats[8]),
-            "ar_small": float(coco_eval.stats[9]),
-            "ar_medium": float(coco_eval.stats[10]),
-            "ar_large": float(coco_eval.stats[11]),
-        }
         redirect_string = io.StringIO()
         with contextlib.redirect_stdout(redirect_string):
             coco_eval.summarize()
+        if len(coco_eval.stats) >= 12:
+            self._custom17_last_coco_stats = {
+                "ap50_95": float(coco_eval.stats[0]),
+                "ap50": float(coco_eval.stats[1]),
+                "ap75": float(coco_eval.stats[2]),
+                "ap_small": float(coco_eval.stats[3]),
+                "ap_medium": float(coco_eval.stats[4]),
+                "ap_large": float(coco_eval.stats[5]),
+                "ar_max1": float(coco_eval.stats[6]),
+                "ar_max10": float(coco_eval.stats[7]),
+                "ar_max100": float(coco_eval.stats[8]),
+                "ar_small": float(coco_eval.stats[9]),
+                "ar_medium": float(coco_eval.stats[10]),
+                "ar_large": float(coco_eval.stats[11]),
+            }
         info += redirect_string.getvalue()
 
         cat_ids = list(coco_gt.cats.keys())
