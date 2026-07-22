@@ -43,7 +43,9 @@ If these diverge, mAP drops sharply and the first thing to verify is class remap
 - `custom17/scripts/compare_onnx_models.py`
 - `custom17/common.py`
 - `custom17/exp/yolox_nano_custom17.py`
+- `custom17/exp/yolox_nano_fusion_custom17.py`
 - `custom17/exp/yolox_tiny_custom17.py`
+- `custom17/models/fusion_head.py`
 
 ## Recommended directory layout
 
@@ -421,6 +423,55 @@ Tiny settings summary:
 
 `no_aug_epochs` disables mosaic in the final stage through the normal YOLOX training flow.
 
+Fusion Nano option for reducing candidate boxes at `640x640`:
+
+- exp file: `custom17/exp/yolox_nano_fusion_custom17.py`
+- keeps the standard YOLOX-Nano backbone and neck
+- replaces only the detection head
+- reduces prediction grids from `80x80 + 40x40 + 20x20` to `40x40 + 20x20`
+- reduces total candidates from `8400` to `2000` at `640x640`
+- intended for lower CPU-side postprocess and NMS cost
+
+Fusion head concept:
+
+```mermaid
+flowchart LR
+  P3["P3 stride 8 (80x80)"] --> D3["3x3 conv stride 2"]
+  P4["P4 stride 16 (40x40)"] --> L4["1x1 lateral"]
+  P5["P5 stride 32 (20x20)"] --> L5["1x1 lateral"]
+  L5 --> U5["upsample to 40x40"]
+  D3 --> F4["concat + fusion at 40x40"]
+  L4 --> F4
+  U5 --> F4
+  F4 --> H4["predict boxes at 40x40"]
+  F4 --> D4["3x3 conv stride 2"]
+  D4 --> F5["concat with P5 at 20x20"]
+  L5 --> F5
+  F5 --> H5["predict boxes at 20x20"]
+```
+
+Why this can help:
+
+- `640x640` normally increases the YOLOX-Nano candidate count from about `3549` at `416x416` to `8400`
+- NMS cost on CPU can increase sharply with candidate count
+- the fusion head preserves high-resolution information by compressing `P3` into the `P4` scale instead of dropping it entirely
+
+Expected trade-off:
+
+- CPU NMS and postprocess cost should drop because far fewer boxes are emitted
+- very small object recall may decrease because there is no direct stride-8 prediction branch
+- the design tries to recover some small-object information by fusing `P3 -> P4` and optionally `P5 -> P4`
+
+Optional control:
+
+- `CUSTOM17_FUSION_USE_P5=0` disables the `P5 -> 40x40` upsample path if you want a simpler fusion branch
+
+Recommended use case:
+
+- when `640x640` input is needed for recall
+- but the standard three-scale head produces too many proposals for CPU inference
+- and the goal is to cut NMS cost without changing backbone or neck FLOPs
+
 ## 9. Fine-tune from YOLOX-Tiny COCO pretrained weights
 
 Tiny single-node example:
@@ -455,6 +506,20 @@ uv run python custom17/scripts/train.py \
   -c /path/to/yolox_nano.pth
 ```
 
+Fusion Nano single-node example:
+
+```bash
+CUSTOM17_INPUT_SIZE=640 \
+uv run python custom17/scripts/train.py \
+  -f custom17/exp/yolox_nano_fusion_custom17.py \
+  -d 1 \
+  -b 32 \
+  --fp16 \
+  -o \
+  --logger mlflow \
+  -c pretrained_models/yolox_nano.pth
+```
+
 CPU-visible GPU count can be adjusted with `-d`.
 
 Notes:
@@ -470,6 +535,7 @@ Notes:
 - evaluation output now includes both `per class AP` (`AP50:95`) and `per class AP50`
 - after training ends, `best_ckpt.pth` is automatically exported to `best_ckpt.onnx`
 - when `--logger mlflow` is used, metrics are sent to MLflow and the run uploads `best_ckpt.pth`, `best_ckpt.onnx`, `train_log.txt`, and the exp file as artifacts
+- MLflow also records `val/COCOAP_small`, `val/COCOAP_medium`, `val/COCOAP_large`, plus matching AR size metrics
 
 Useful MLflow environment variables:
 
