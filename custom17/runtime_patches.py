@@ -104,6 +104,20 @@ def patch_coco_evaluator_output() -> None:
         coco_eval = COCOeval(coco_gt, coco_dt, ann_type[1])
         coco_eval.evaluate()
         coco_eval.accumulate()
+        self._custom17_last_coco_stats = {
+            "ap50_95": float(coco_eval.stats[0]),
+            "ap50": float(coco_eval.stats[1]),
+            "ap75": float(coco_eval.stats[2]),
+            "ap_small": float(coco_eval.stats[3]),
+            "ap_medium": float(coco_eval.stats[4]),
+            "ap_large": float(coco_eval.stats[5]),
+            "ar_max1": float(coco_eval.stats[6]),
+            "ar_max10": float(coco_eval.stats[7]),
+            "ar_max100": float(coco_eval.stats[8]),
+            "ar_small": float(coco_eval.stats[9]),
+            "ar_medium": float(coco_eval.stats[10]),
+            "ar_large": float(coco_eval.stats[11]),
+        }
         redirect_string = io.StringIO()
         with contextlib.redirect_stdout(redirect_string):
             coco_eval.summarize()
@@ -189,6 +203,36 @@ def patch_mlflow_logger_for_custom17() -> None:
     mlflow_logger_module.MlflowLogger.setup = patched_setup
     mlflow_logger_module.MlflowLogger.on_train_end = patched_on_train_end
     mlflow_logger_module._custom17_mlflow_patch_applied = True
+
+
+def patch_trainer_for_mlflow_eval_metrics() -> None:
+    from yolox.core import trainer as trainer_module
+
+    if getattr(trainer_module, "_custom17_mlflow_eval_patch_applied", False):
+        return
+
+    original_evaluate_and_save_model = trainer_module.Trainer.evaluate_and_save_model
+
+    def patched_evaluate_and_save_model(self):
+        result = original_evaluate_and_save_model(self)
+        if self.rank != 0 or self.args.logger != "mlflow":
+            return result
+        evaluator_stats = getattr(self.evaluator, "_custom17_last_coco_stats", None)
+        if not evaluator_stats:
+            return result
+        logs = {
+            "val/COCOAP_small": evaluator_stats["ap_small"],
+            "val/COCOAP_medium": evaluator_stats["ap_medium"],
+            "val/COCOAP_large": evaluator_stats["ap_large"],
+            "val/COCOAR_small": evaluator_stats["ar_small"],
+            "val/COCOAR_medium": evaluator_stats["ar_medium"],
+            "val/COCOAR_large": evaluator_stats["ar_large"],
+        }
+        self.mlflow_logger.on_log(self.args, self.exp, self.epoch + 1, logs)
+        return result
+
+    trainer_module.Trainer.evaluate_and_save_model = patched_evaluate_and_save_model
+    trainer_module._custom17_mlflow_eval_patch_applied = True
 
 
 def export_best_ckpt_to_onnx(trainer) -> Path | None:
