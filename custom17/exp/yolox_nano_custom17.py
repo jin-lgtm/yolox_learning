@@ -19,6 +19,7 @@ from yolox.exp import Exp as MyExp
 from custom17.common import (
     CUSTOM17_CLASSES,
     resolve_bool_env,
+    resolve_float_env,
     resolve_int_env,
     resolve_optional_int_env,
     resolve_size_override,
@@ -59,9 +60,10 @@ class Exp(MyExp):
         self.hsv_prob = 1.0
         self.flip_prob = 0.5
 
-        self.basic_lr_per_img = 0.01 / 64.0
+        self.basic_lr_per_img = resolve_float_env("CUSTOM17_BASIC_LR_PER_IMG", 0.01 / 64.0)
         self.test_conf = 0.001
         self.nmsthre = 0.65
+        self.head_strides = [8, 16, 32]
         self.balanced_resample = resolve_bool_env("CUSTOM17_BALANCED_RESAMPLE", False)
         self.balanced_resample_seed = resolve_int_env("CUSTOM17_BALANCED_RESAMPLE_SEED", 42)
         self.balanced_target_count = resolve_optional_int_env("CUSTOM17_BALANCED_TARGET_COUNT")

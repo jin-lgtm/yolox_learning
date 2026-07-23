@@ -64,6 +64,7 @@ class Exp(MyExp):
         self.basic_lr_per_img = resolve_float_env("CUSTOM17_BASIC_LR_PER_IMG", 0.01 / 64.0)
         self.test_conf = 0.001
         self.nmsthre = 0.65
+        self.head_strides = [16, 32]
         self.balanced_resample = resolve_bool_env("CUSTOM17_BALANCED_RESAMPLE", False)
         self.balanced_resample_seed = resolve_int_env("CUSTOM17_BALANCED_RESAMPLE_SEED", 42)
         self.balanced_target_count = resolve_optional_int_env("CUSTOM17_BALANCED_TARGET_COUNT")

@@ -30,7 +30,7 @@ if str(YOLOX_ROOT) not in sys.path:
 from custom17.common import CUSTOM17_CLASSES
 from yolox.data.data_augment import preproc as preprocess
 from yolox.exp import get_exp
-from yolox.utils import demo_postprocess, multiclass_nms
+from yolox.utils import multiclass_nms
 
 
 def make_parser():
@@ -76,6 +76,32 @@ def per_class_ap50_table(coco_eval: COCOeval, class_names):
     return _build_metric_table(ap50_by_class, headers=["class", "AP50"], columns=6)
 
 
+def decode_outputs_with_strides(outputs: np.ndarray, img_size, strides) -> np.ndarray:
+    grids = []
+    expanded_strides = []
+    hsizes = [img_size[0] // stride for stride in strides]
+    wsizes = [img_size[1] // stride for stride in strides]
+
+    for hsize, wsize, stride in zip(hsizes, wsizes, strides):
+        xv, yv = np.meshgrid(np.arange(wsize), np.arange(hsize))
+        grid = np.stack((xv, yv), 2).reshape(1, -1, 2)
+        grids.append(grid)
+        shape = grid.shape[:2]
+        expanded_strides.append(np.full((*shape, 1), stride))
+
+    grids = np.concatenate(grids, axis=1)
+    expanded_strides = np.concatenate(expanded_strides, axis=1)
+    if outputs.shape[1] != grids.shape[1]:
+        raise ValueError(
+            f"ONNX output anchor count mismatch: got {outputs.shape[1]}, "
+            f"expected {grids.shape[1]} for strides={strides} and img_size={img_size}"
+        )
+    outputs = outputs.copy()
+    outputs[..., :2] = (outputs[..., :2] + grids) * expanded_strides
+    outputs[..., 2:4] = np.exp(outputs[..., 2:4]) * expanded_strides
+    return outputs
+
+
 class ONNXEvaluator:
     def __init__(self, model_path: str, exp, provider: str):
         providers = (
@@ -87,13 +113,14 @@ class ONNXEvaluator:
         self.input_name = self.session.get_inputs()[0].name
         self.input_type = self.session.get_inputs()[0].type
         self.test_size = exp.test_size
+        self.head_strides = getattr(exp, "head_strides", [8, 16, 32])
 
     def infer(self, image: np.ndarray):
         img, ratio = preprocess(image, self.test_size)
         dtype = np.float16 if "float16" in self.input_type else np.float32
         ort_inputs = {self.input_name: img[None, :, :, :].astype(dtype)}
         output = self.session.run(None, ort_inputs)[0]
-        predictions = demo_postprocess(output, self.test_size)[0]
+        predictions = decode_outputs_with_strides(output, self.test_size, self.head_strides)[0]
         return predictions, ratio
 
 
