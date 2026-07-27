@@ -39,8 +39,8 @@ class YOLOXFusionHead(YOLOXHead):
         super().__init__(
             num_classes=num_classes,
             width=width,
-            strides=[16, 32],
-            in_channels=[hidden_channels, hidden_channels],
+            strides=[32],#[16, 32],
+            in_channels=[hidden_channels],#[hidden_channels, hidden_channels],
             act=act,
             depthwise=depthwise,
         )
@@ -87,7 +87,7 @@ class YOLOXFusionHead(YOLOXHead):
 
         p4_down = self.p4_to_p5(p4_fused)
         p5_fused = self.p5_fusion(torch.cat([p4_down, p5_lat], dim=1))
-        return [p4_fused, p5_fused]
+        return [p5_fused]#[p4_fused, p5_fused]
 
     def forward(self, xin, labels=None, imgs=None):
         return super().forward(self._build_head_features(xin), labels=labels, imgs=imgs)

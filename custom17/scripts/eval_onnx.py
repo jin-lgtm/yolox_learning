@@ -33,6 +33,37 @@ from yolox.exp import get_exp
 from yolox.utils import multiclass_nms
 
 
+def concrete_input_size(shape) -> tuple[int, int]:
+    dims = [str(dim) for dim in shape]
+    if len(dims) != 4:
+        raise ValueError(f"Expected 4D ONNX input shape, got: {dims}")
+    if not dims[2].isdigit() or not dims[3].isdigit():
+        raise ValueError(f"Dynamic spatial input shape is not supported: {dims}")
+    return int(dims[2]), int(dims[3])
+
+
+def infer_strides_from_output_count(img_size, output_count: int):
+    candidate_stride_sets = (
+        [8],
+        [16],
+        [32],
+        [64],
+        [8, 16],
+        [8, 16, 32],
+        [16, 32],
+        [32, 64],
+        [8, 16, 32, 64],
+    )
+    for strides in candidate_stride_sets:
+        expected = sum((img_size[0] // stride) * (img_size[1] // stride) for stride in strides)
+        if expected == output_count:
+            return strides
+    raise ValueError(
+        f"Unable to infer strides for output_count={output_count} and img_size={img_size}. "
+        f"Known candidates: {candidate_stride_sets}"
+    )
+
+
 def make_parser():
     parser = argparse.ArgumentParser("Custom17 ONNX evaluation")
     parser.add_argument("-m", "--model", required=True, type=str, help="Path to ONNX model.")
@@ -112,15 +143,18 @@ class ONNXEvaluator:
         self.session = onnxruntime.InferenceSession(model_path, providers=providers)
         self.input_name = self.session.get_inputs()[0].name
         self.input_type = self.session.get_inputs()[0].type
-        self.test_size = exp.test_size
+        self.test_size = concrete_input_size(self.session.get_inputs()[0].shape)
         self.head_strides = getattr(exp, "head_strides", [8, 16, 32])
+        self._resolved_head_strides = None
 
     def infer(self, image: np.ndarray):
         img, ratio = preprocess(image, self.test_size)
         dtype = np.float16 if "float16" in self.input_type else np.float32
         ort_inputs = {self.input_name: img[None, :, :, :].astype(dtype)}
         output = self.session.run(None, ort_inputs)[0]
-        predictions = decode_outputs_with_strides(output, self.test_size, self.head_strides)[0]
+        if self._resolved_head_strides is None:
+            self._resolved_head_strides = infer_strides_from_output_count(self.test_size, int(output.shape[1]))
+        predictions = decode_outputs_with_strides(output, self.test_size, self._resolved_head_strides)[0]
         return predictions, ratio
 
 

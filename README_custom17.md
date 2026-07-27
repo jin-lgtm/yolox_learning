@@ -669,6 +669,19 @@ uv run python custom17/scripts/onnx_infer.py video \
   --save-result
 ```
 
+Side-by-side comparison with two ONNX models:
+
+```bash
+uv run python custom17/scripts/onnx_infer.py webcam \
+  -m YOLOX_outputs/yolox_nano_custom17/best_ckpt.onnx \
+  -f custom17/exp/yolox_nano_custom17.py \
+  --model-b YOLOX_outputs/yolox_nano_fusion_custom17/best_ckpt.onnx \
+  --exp-file-b custom17/exp/yolox_nano_fusion_custom17.py \
+  --provider cpu
+```
+
+If both ONNX files use the same Exp, `--exp-file-b` can be omitted.
+
 COCO-style evaluation with the exported ONNX:
 
 ```bash

@@ -5,11 +5,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from collections import Counter
 from pathlib import Path
 
+import cv2
 import numpy as np
 import onnx
 import onnxruntime
@@ -23,6 +25,9 @@ if str(YOLOX_ROOT) not in sys.path:
     sys.path.insert(0, str(YOLOX_ROOT))
 
 from yolox.utils import multiclass_nms
+from yolox.data.data_augment import preproc as preprocess
+
+IMAGE_EXT = {".jpg", ".jpeg", ".webp", ".bmp", ".png"}
 
 
 def tensor_shape(value_info) -> list[str]:
@@ -158,8 +163,14 @@ def benchmark_model(path: Path, provider: str, warmup: int, iterations: int) -> 
 
 def infer_strides_from_output_count(img_size: list[int], output_count: int) -> list[int]:
     candidate_stride_sets = (
+        [8],
+        [16],
+        [32],
+        [64],
+        [8, 16],
         [8, 16, 32],
         [16, 32],
+        [32, 64],
         [8, 16, 32, 64],
     )
     for strides in candidate_stride_sets:
@@ -276,6 +287,142 @@ def benchmark_model_with_nms(
     }
 
 
+def get_image_list(path: str) -> list[str]:
+    image_names = []
+    for maindir, _, file_name_list in os.walk(path):
+        for filename in file_name_list:
+            apath = os.path.join(maindir, filename)
+            ext = os.path.splitext(apath)[1].lower()
+            if ext in IMAGE_EXT:
+                image_names.append(apath)
+    return sorted(image_names)
+
+
+def load_benchmark_images(image: str | None, image_dir: str | None) -> list[np.ndarray]:
+    if image:
+        frame = cv2.imread(image)
+        if frame is None:
+            raise FileNotFoundError(f"Unable to read image: {image}")
+        return [frame]
+    if image_dir:
+        paths = get_image_list(image_dir)
+        if not paths:
+            raise FileNotFoundError(f"No images found under: {image_dir}")
+        frames = []
+        for path in paths:
+            frame = cv2.imread(path)
+            if frame is None:
+                raise FileNotFoundError(f"Unable to read image: {path}")
+            frames.append(frame)
+        return frames
+    return []
+
+
+def benchmark_model_with_nms_on_images(
+    path: Path,
+    provider: str,
+    warmup: int,
+    iterations: int,
+    score_thr: float,
+    nms_thr: float,
+    frames: list[np.ndarray],
+) -> dict:
+    providers = (
+        ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        if provider == "cuda"
+        else ["CPUExecutionProvider"]
+    )
+    session = onnxruntime.InferenceSession(str(path), providers=providers)
+    input_meta = session.get_inputs()[0]
+    input_shape = concrete_input_shape([str(dim) for dim in input_meta.shape])
+    dtype = numpy_dtype_from_onnx(input_meta.type.replace("tensor(", "").replace(")", "").upper())
+
+    sample_input = preprocess(frames[0], (input_shape[2], input_shape[3]))[0][None, :, :, :].astype(dtype)
+    sample_output = session.run(None, {input_meta.name: sample_input})[0]
+    strides = infer_strides_from_output_count(input_shape, int(sample_output.shape[1]))
+    candidate_count = int(sample_output.shape[1])
+
+    prepared_inputs = []
+    for frame in frames:
+        img, ratio = preprocess(frame, (input_shape[2], input_shape[3]))
+        prepared_inputs.append((img[None, :, :, :].astype(dtype), ratio))
+
+    for warm_idx in range(warmup):
+        sample, ratio = prepared_inputs[warm_idx % len(prepared_inputs)]
+        output = session.run(None, {input_meta.name: sample})[0]
+        decoded = decode_outputs_with_strides(output, input_shape, strides)[0]
+        boxes = decoded[:, :4]
+        scores = decoded[:, 4:5] * decoded[:, 5:]
+        boxes_xyxy = np.ones_like(boxes)
+        boxes_xyxy[:, 0] = boxes[:, 0] - boxes[:, 2] / 2.0
+        boxes_xyxy[:, 1] = boxes[:, 1] - boxes[:, 3] / 2.0
+        boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2] / 2.0
+        boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3] / 2.0
+        boxes_xyxy /= ratio
+        multiclass_nms(boxes_xyxy, scores, nms_thr=nms_thr, score_thr=score_thr)
+
+    preprocess_ms = []
+    infer_ms = []
+    decode_ms = []
+    nms_ms = []
+    total_ms = []
+    det_counts = []
+    scored_candidate_counts = []
+
+    for iter_idx in range(iterations):
+        frame = frames[iter_idx % len(frames)]
+        total_start = time.perf_counter()
+        img, ratio = preprocess(frame, (input_shape[2], input_shape[3]))
+        preprocess_end = time.perf_counter()
+
+        ort_input = {input_meta.name: img[None, :, :, :].astype(dtype)}
+        output = session.run(None, ort_input)[0]
+        infer_end = time.perf_counter()
+
+        decoded = decode_outputs_with_strides(output, input_shape, strides)[0]
+        decode_end = time.perf_counter()
+
+        boxes = decoded[:, :4]
+        scores = decoded[:, 4:5] * decoded[:, 5:]
+        boxes_xyxy = np.ones_like(boxes)
+        boxes_xyxy[:, 0] = boxes[:, 0] - boxes[:, 2] / 2.0
+        boxes_xyxy[:, 1] = boxes[:, 1] - boxes[:, 3] / 2.0
+        boxes_xyxy[:, 2] = boxes[:, 0] + boxes[:, 2] / 2.0
+        boxes_xyxy[:, 3] = boxes[:, 1] + boxes[:, 3] / 2.0
+        boxes_xyxy /= ratio
+        dets = multiclass_nms(boxes_xyxy, scores, nms_thr=nms_thr, score_thr=score_thr)
+        total_end = time.perf_counter()
+
+        preprocess_ms.append((preprocess_end - total_start) * 1000.0)
+        infer_ms.append((infer_end - preprocess_end) * 1000.0)
+        decode_ms.append((decode_end - infer_end) * 1000.0)
+        nms_ms.append((total_end - decode_end) * 1000.0)
+        total_ms.append((total_end - total_start) * 1000.0)
+        det_counts.append(0 if dets is None else int(dets.shape[0]))
+        scored_candidate_counts.append(int((scores.max(axis=1) > score_thr).sum()))
+
+    return {
+        "path": str(path),
+        "provider": session.get_providers()[0] if session.get_providers() else "unknown",
+        "input_shape": input_shape,
+        "strides": strides,
+        "score_thr": score_thr,
+        "nms_thr": nms_thr,
+        "images_used": len(frames),
+        "candidates": candidate_count,
+        "warmup": warmup,
+        "iterations": iterations,
+        "mean_preprocess_ms": float(np.mean(preprocess_ms)),
+        "mean_infer_ms": float(np.mean(infer_ms)),
+        "mean_decode_ms": float(np.mean(decode_ms)),
+        "mean_nms_ms": float(np.mean(nms_ms)),
+        "mean_total_ms": float(np.mean(total_ms)),
+        "median_total_ms": float(np.median(total_ms)),
+        "mean_scored_candidates": float(np.mean(scored_candidate_counts)),
+        "mean_detections": float(np.mean(det_counts)),
+    }
+
+
 def print_json(title: str, payload) -> None:
     print(title)
     print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -322,6 +469,8 @@ def main() -> None:
     parser.add_argument("--iterations", type=int, default=30, help="Timed iterations for benchmarking.")
     parser.add_argument("--score-thr", type=float, default=0.3, help="Score threshold for NMS benchmark.")
     parser.add_argument("--nms-thr", type=float, default=0.45, help="NMS threshold for NMS benchmark.")
+    parser.add_argument("--image", type=str, default=None, help="Benchmark with a real image.")
+    parser.add_argument("--image-dir", type=str, default=None, help="Benchmark with all images under a directory.")
     args = parser.parse_args()
 
     summary_a = summarize_model(args.a.resolve())
@@ -385,22 +534,43 @@ def main() -> None:
         print(f"Benchmark mean ratio (B/A): {ratio:.3f}x")
 
     if args.benchmark_nms:
-        bench_a = benchmark_model_with_nms(
-            args.a.resolve(),
-            args.provider,
-            args.warmup,
-            args.iterations,
-            args.score_thr,
-            args.nms_thr,
-        )
-        bench_b = benchmark_model_with_nms(
-            args.b.resolve(),
-            args.provider,
-            args.warmup,
-            args.iterations,
-            args.score_thr,
-            args.nms_thr,
-        )
+        frames = load_benchmark_images(args.image, args.image_dir)
+        if frames:
+            bench_a = benchmark_model_with_nms_on_images(
+                args.a.resolve(),
+                args.provider,
+                args.warmup,
+                args.iterations,
+                args.score_thr,
+                args.nms_thr,
+                frames,
+            )
+            bench_b = benchmark_model_with_nms_on_images(
+                args.b.resolve(),
+                args.provider,
+                args.warmup,
+                args.iterations,
+                args.score_thr,
+                args.nms_thr,
+                frames,
+            )
+        else:
+            bench_a = benchmark_model_with_nms(
+                args.a.resolve(),
+                args.provider,
+                args.warmup,
+                args.iterations,
+                args.score_thr,
+                args.nms_thr,
+            )
+            bench_b = benchmark_model_with_nms(
+                args.b.resolve(),
+                args.provider,
+                args.warmup,
+                args.iterations,
+                args.score_thr,
+                args.nms_thr,
+            )
         print("Benchmark+NMS A")
         print_json("A timing+postprocess", bench_a)
         print("Benchmark+NMS B")

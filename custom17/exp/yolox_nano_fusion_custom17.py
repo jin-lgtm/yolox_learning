@@ -49,7 +49,7 @@ class Exp(MyExp):
         self.max_epoch = 50
         self.no_aug_epochs = 10
         self.warmup_epochs = 3
-        self.data_num_workers = 4
+        self.data_num_workers = 0
         self.eval_interval = 1
 
         self.mosaic_prob = 0.5
