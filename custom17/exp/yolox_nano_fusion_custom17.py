@@ -23,6 +23,7 @@ from custom17.common import (
     resolve_int_env,
     resolve_optional_int_env,
     resolve_size_override,
+    resolve_str_env,
 )
 from custom17.models import YOLOXFusionHead
 from custom17.train_loader import build_custom17_train_loader
@@ -64,13 +65,30 @@ class Exp(MyExp):
         self.basic_lr_per_img = resolve_float_env("CUSTOM17_BASIC_LR_PER_IMG", 0.01 / 64.0)
         self.test_conf = 0.001
         self.nmsthre = 0.65
-        self.head_strides = [16, 32]
         self.balanced_resample = resolve_bool_env("CUSTOM17_BALANCED_RESAMPLE", False)
         self.balanced_resample_seed = resolve_int_env("CUSTOM17_BALANCED_RESAMPLE_SEED", 42)
         self.balanced_target_count = resolve_optional_int_env("CUSTOM17_BALANCED_TARGET_COUNT")
 
+        self.fusion_prediction_mode = resolve_str_env("CUSTOM17_FUSION_PREDICTION_MODE", "p5").lower()
         self.fusion_use_p5 = resolve_bool_env("CUSTOM17_FUSION_USE_P5", True)
-        self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
+        self.fusion_p4_residual = resolve_bool_env("CUSTOM17_FUSION_P4_RESIDUAL", False)
+        self.fusion_p5_residual = resolve_bool_env("CUSTOM17_FUSION_P5_RESIDUAL", False)
+
+        head_stride_map = {
+            "p4": [16],
+            "p5": [32],
+            "p4p5": [16, 32],
+        }
+        if self.fusion_prediction_mode not in head_stride_map:
+            raise ValueError(
+                f"Unsupported CUSTOM17_FUSION_PREDICTION_MODE={self.fusion_prediction_mode!r}. "
+                f"Expected one of {sorted(head_stride_map)}"
+            )
+        self.head_strides = head_stride_map[self.fusion_prediction_mode]
+
+        base_exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
+        ablation_tag = resolve_str_env("CUSTOM17_ABLATION_TAG", "")
+        self.exp_name = f"{base_exp_name}_{ablation_tag}" if ablation_tag else base_exp_name
 
     def get_data_loader(self, batch_size, is_distributed, no_aug=False, cache_img=None):
         return build_custom17_train_loader(
@@ -105,6 +123,9 @@ class Exp(MyExp):
                 act=self.act,
                 depthwise=True,
                 use_p5_fusion=self.fusion_use_p5,
+                prediction_mode=self.fusion_prediction_mode,
+                p4_residual=self.fusion_p4_residual,
+                p5_residual=self.fusion_p5_residual,
             )
             self.model = YOLOX(backbone, head)
 

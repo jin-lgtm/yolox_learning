@@ -465,6 +465,10 @@ Expected trade-off:
 Optional control:
 
 - `CUSTOM17_FUSION_USE_P5=0` disables the `P5 -> 40x40` upsample path if you want a simpler fusion branch
+- `CUSTOM17_FUSION_PREDICTION_MODE=p4|p5|p4p5` selects which prediction grid(s) are emitted
+- `CUSTOM17_FUSION_P4_RESIDUAL=1` enables `p4_fused + p4_lat`
+- `CUSTOM17_FUSION_P5_RESIDUAL=1` enables `p5_fused + p5_lat`
+- `CUSTOM17_ABLATION_TAG=<name>` appends a suffix to `exp_name`, output dir, and exported ONNX path
 
 Recommended use case:
 
@@ -519,6 +523,71 @@ uv run python custom17/scripts/train.py \
   --logger mlflow \
   -c pretrained_models/yolox_nano.pth
 ```
+
+Fusion Nano ablation helper:
+
+```bash
+custom17/scripts/run_ablation_nano.sh nano_fuse_p4p5_640 \
+  -d 1 \
+  -b 32 \
+  --fp16 \
+  -o \
+  --logger mlflow \
+  -c pretrained_models/yolox_nano.pth
+```
+
+Supported variants:
+
+- `nano_std_640`
+- `nano_fuse_p4p5_640`
+- `nano_fuse_p5_640`
+- `nano_fuse_p4ctxp5_on_640`
+- `nano_fuse_p4ctxp5_off_640`
+- `nano_fuse_p4p5_res_on_640`
+- `nano_fuse_p4p5_res_off_640`
+
+Run the full Nano ablation set in one shot:
+
+```bash
+custom17/scripts/run_all_ablation_nano.sh \
+  -d 1 \
+  -b 32 \
+  --fp16 \
+  -o \
+  --logger mlflow \
+  -c pretrained_models/yolox_nano.pth
+```
+
+This runs every variant sequentially, stores each training log under:
+
+```text
+runs/ablation_nano_<timestamp>/
+```
+
+and stores model outputs separately under:
+
+```text
+YOLOX_outputs/yolox_nano_custom17_<variant>/
+YOLOX_outputs/yolox_nano_fusion_custom17_<variant>/
+```
+
+For each successful run it also:
+
+- evaluates `best_ckpt.onnx` with `mAP50`, `mAP50_95`, `AP_small`, `AP_medium`, `AP_large`
+- benchmarks ONNX CPU inference and postprocess on up to 50 validation images
+- appends one row to:
+
+```text
+runs/ablation_nano_<timestamp>/summary.csv
+```
+
+Per-variant artifacts are stored under the same log root, for example:
+
+- `<variant>.log`
+- `<variant>_eval.log`
+- `<variant>_bench.log`
+- `<variant>_eval_metrics.json`
+- `<variant>_benchmark.json`
 
 CPU-visible GPU count can be adjusted with `-d`.
 

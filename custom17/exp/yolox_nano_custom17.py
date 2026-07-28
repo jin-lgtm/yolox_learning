@@ -23,6 +23,7 @@ from custom17.common import (
     resolve_int_env,
     resolve_optional_int_env,
     resolve_size_override,
+    resolve_str_env,
 )
 from custom17.train_loader import build_custom17_train_loader
 
@@ -68,7 +69,9 @@ class Exp(MyExp):
         self.balanced_resample_seed = resolve_int_env("CUSTOM17_BALANCED_RESAMPLE_SEED", 42)
         self.balanced_target_count = resolve_optional_int_env("CUSTOM17_BALANCED_TARGET_COUNT")
 
-        self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
+        base_exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
+        ablation_tag = resolve_str_env("CUSTOM17_ABLATION_TAG", "")
+        self.exp_name = f"{base_exp_name}_{ablation_tag}" if ablation_tag else base_exp_name
 
     def get_data_loader(self, batch_size, is_distributed, no_aug=False, cache_img=None):
         return build_custom17_train_loader(

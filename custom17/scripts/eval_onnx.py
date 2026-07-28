@@ -75,6 +75,7 @@ def make_parser():
     parser.add_argument("--provider", choices=("cpu", "cuda"), default="cpu")
     parser.add_argument("--batch-size", type=int, default=1, help="Reserved for future use. Current evaluator uses 1.")
     parser.add_argument("--save-json", type=str, default=None, help="Optional output path for detection JSON.")
+    parser.add_argument("--save-metrics-json", type=str, default=None, help="Optional output path for evaluation metrics JSON.")
     return parser
 
 
@@ -245,6 +246,22 @@ def run_eval(args):
     avg_infer_ms = 1000.0 * total_infer / max(len(image_ids), 1)
     avg_nms_ms = 1000.0 * total_nms / max(len(image_ids), 1)
 
+    per_class_ap = {
+        name: float(np.mean(coco_eval.eval["precision"][:, :, idx, 0, -1][coco_eval.eval["precision"][:, :, idx, 0, -1] > -1]) * 100.0)
+        if np.any(coco_eval.eval["precision"][:, :, idx, 0, -1] > -1)
+        else float("nan")
+        for idx, name in enumerate(cat_names)
+    }
+    per_class_ap50 = {}
+    precisions = coco_eval.eval["precision"]
+    iou_thresholds = np.array(coco_eval.params.iouThrs)
+    iou_index = int(np.argmin(np.abs(iou_thresholds - 0.5)))
+    for idx, name in enumerate(cat_names):
+        precision = precisions[iou_index, :, idx, 0, -1]
+        precision = precision[precision > -1]
+        ap50 = np.mean(precision) if precision.size else float("nan")
+        per_class_ap50[name] = float(ap50 * 100.0)
+
     print(
         "\n".join(
             [
@@ -254,23 +271,44 @@ def run_eval(args):
                 summary_buffer.getvalue().rstrip(),
                 "per class AP:",
                 _build_metric_table(
-                    {
-                        name: float(np.mean(coco_eval.eval["precision"][:, :, idx, 0, -1][coco_eval.eval["precision"][:, :, idx, 0, -1] > -1]) * 100.0)
-                        if np.any(coco_eval.eval["precision"][:, :, idx, 0, -1] > -1)
-                        else float("nan")
-                        for idx, name in enumerate(cat_names)
-                    },
+                    per_class_ap,
                     headers=["class", "AP"],
                     columns=6,
                 ),
                 "per class AP50:",
-                per_class_ap50_table(coco_eval, cat_names),
+                _build_metric_table(per_class_ap50, headers=["class", "AP50"], columns=6),
             ]
         )
     )
 
     print(f"mAP50_95: {coco_eval.stats[0] * 100.0:.3f}")
     print(f"mAP50: {coco_eval.stats[1] * 100.0:.3f}")
+
+    metrics = {
+        "model": args.model,
+        "annotation": str(annotation_path),
+        "image_dir": str(image_dir),
+        "provider": args.provider,
+        "input_size": list(predictor.test_size),
+        "head_strides": list(predictor._resolved_head_strides or predictor.head_strides),
+        "avg_forward_ms": avg_infer_ms,
+        "avg_nms_ms": avg_nms_ms,
+        "avg_total_ms": avg_infer_ms + avg_nms_ms,
+        "mAP50_95": float(coco_eval.stats[0] * 100.0),
+        "mAP50": float(coco_eval.stats[1] * 100.0),
+        "AP_small": float(coco_eval.stats[3] * 100.0),
+        "AP_medium": float(coco_eval.stats[4] * 100.0),
+        "AP_large": float(coco_eval.stats[5] * 100.0),
+        "per_class_ap": per_class_ap,
+        "per_class_ap50": per_class_ap50,
+    }
+    if args.save_metrics_json:
+        metrics_path = Path(args.save_metrics_json)
+        metrics_path.parent.mkdir(parents=True, exist_ok=True)
+        with metrics_path.open("w", encoding="utf-8") as fp:
+            json.dump(metrics, fp, ensure_ascii=False, indent=2)
+        logger.info("Saved evaluation metrics JSON to {}", metrics_path)
+    return metrics
 
 
 def main():

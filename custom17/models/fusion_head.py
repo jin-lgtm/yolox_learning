@@ -11,7 +11,7 @@ from yolox.models.yolo_head import YOLOXHead
 
 
 class YOLOXFusionHead(YOLOXHead):
-    """Reduce candidate boxes by predicting on fused 1/16 and 1/32 grids only.
+    """Fusion-style YOLOX head with configurable prediction levels.
 
     Input feature maps are expected to be the standard YOLOX P3/P4/P5 outputs:
     - P3: stride 8
@@ -19,12 +19,10 @@ class YOLOXFusionHead(YOLOXHead):
     - P5: stride 32
 
     The head spatially compresses P3 to the P4 resolution, optionally upsamples
-    P5 to the same resolution, and predicts on:
-    - fused P4-scale map (e.g. 40x40 for 640 input)
-    - fused P5-scale map (e.g. 20x20 for 640 input)
-
-    This reduces candidate boxes from 80x80 + 40x40 + 20x20 = 8400
-    to 40x40 + 20x20 = 2000 for 640x640 input.
+    P5 to the same resolution, and can predict on:
+    - fused P4 only (`prediction_mode="p4"`)
+    - fused P5 only (`prediction_mode="p5"`)
+    - fused P4 + P5 (`prediction_mode="p4p5"`)
     """
 
     def __init__(
@@ -34,19 +32,36 @@ class YOLOXFusionHead(YOLOXHead):
         act: str = "silu",
         depthwise: bool = False,
         use_p5_fusion: bool = True,
+        prediction_mode: str = "p5",
+        p4_residual: bool = False,
+        p5_residual: bool = False,
     ) -> None:
         hidden_channels = 256
+        normalized_mode = prediction_mode.strip().lower()
+        stride_map = {
+            "p4": [16],
+            "p5": [32],
+            "p4p5": [16, 32],
+        }
+        if normalized_mode not in stride_map:
+            raise ValueError(
+                f"Unsupported prediction_mode={prediction_mode!r}. Expected one of {sorted(stride_map)}"
+            )
+        out_strides = stride_map[normalized_mode]
         super().__init__(
             num_classes=num_classes,
             width=width,
-            strides=[32],#[16, 32],
-            in_channels=[hidden_channels],#[hidden_channels, hidden_channels],
+            strides=out_strides,
+            in_channels=[hidden_channels] * len(out_strides),
             act=act,
             depthwise=depthwise,
         )
         Conv = DWConv if depthwise else BaseConv
 
         self.use_p5_fusion = use_p5_fusion
+        self.prediction_mode = normalized_mode
+        self.p4_residual = p4_residual
+        self.p5_residual = p5_residual
         c3 = int(256 * width)
         c4 = int(512 * width)
         c5 = int(1024 * width)
@@ -84,10 +99,19 @@ class YOLOXFusionHead(YOLOXHead):
             p5_up = F.interpolate(p5_lat, size=p4_lat.shape[-2:], mode="nearest")
             p4_parts.append(p5_up)
         p4_fused = self.p4_fusion(torch.cat(p4_parts, dim=1))
+        if self.p4_residual:
+            p4_fused = p4_fused + p4_lat
 
         p4_down = self.p4_to_p5(p4_fused)
         p5_fused = self.p5_fusion(torch.cat([p4_down, p5_lat], dim=1))
-        return [p5_fused]#[p4_fused, p5_fused]
+        if self.p5_residual:
+            p5_fused = p5_fused + p5_lat
+
+        if self.prediction_mode == "p4":
+            return [p4_fused]
+        if self.prediction_mode == "p5":
+            return [p5_fused]
+        return [p4_fused, p5_fused]
 
     def forward(self, xin, labels=None, imgs=None):
         return super().forward(self._build_head_features(xin), labels=labels, imgs=imgs)
