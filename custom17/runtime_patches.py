@@ -8,6 +8,7 @@ import io
 import itertools
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Sequence
@@ -165,6 +166,66 @@ def _log_mlflow_artifact(mlflow_logger, artifact_path: Path, artifact_dir: str) 
         logger.exception("Failed to log MLflow artifact: {}", artifact_path)
 
 
+def _onnx_tensor_shape(value_info) -> list[str]:
+    dims = []
+    for dim in value_info.type.tensor_type.shape.dim:
+        if dim.HasField("dim_value"):
+            dims.append(str(dim.dim_value))
+        elif dim.HasField("dim_param"):
+            dims.append(dim.dim_param)
+        else:
+            dims.append("?")
+    return dims
+
+
+def _onnx_tensor_dtype(value_info) -> str:
+    from onnx import TensorProto
+
+    return TensorProto.DataType.Name(value_info.type.tensor_type.elem_type)
+
+
+def _extract_onnx_io_summary(onnx_path: Path) -> dict[str, list[dict[str, object]]]:
+    import onnx
+
+    model = onnx.load(str(onnx_path))
+    graph = model.graph
+    return {
+        "inputs": [
+            {
+                "name": value.name,
+                "dtype": _onnx_tensor_dtype(value),
+                "shape": _onnx_tensor_shape(value),
+            }
+            for value in graph.input
+        ],
+        "outputs": [
+            {
+                "name": value.name,
+                "dtype": _onnx_tensor_dtype(value),
+                "shape": _onnx_tensor_shape(value),
+            }
+            for value in graph.output
+        ],
+    }
+
+
+def _prepare_mlflow_onnx_artifacts(file_dir: Path) -> tuple[Path | None, Path | None, dict[str, list[dict[str, object]]] | None]:
+    source_onnx = file_dir / "best_ckpt.onnx"
+    if not source_onnx.exists():
+        return None, None, None
+
+    deploy_onnx = file_dir / "model.onnx"
+    if deploy_onnx.resolve() != source_onnx.resolve():
+        shutil.copy2(source_onnx, deploy_onnx)
+
+    io_summary = _extract_onnx_io_summary(deploy_onnx)
+    io_json_path = file_dir / "model_io.json"
+    with io_json_path.open("w", encoding="utf-8") as fp:
+        json.dump(io_summary, fp, ensure_ascii=False, indent=2)
+
+    return deploy_onnx, io_json_path, io_summary
+
+
 def patch_mlflow_logger_for_custom17() -> None:
     from yolox.utils import is_main_process
     import yolox.utils.mlflow_logger as mlflow_logger_module
@@ -196,6 +257,19 @@ def patch_mlflow_logger_for_custom17() -> None:
             file_dir = Path(file_name)
             _log_mlflow_artifact(self, file_dir / "best_ckpt.pth", artifact_dir)
             _log_mlflow_artifact(self, file_dir / "best_ckpt.onnx", artifact_dir)
+            if os.getenv("CUSTOM17_MLFLOW_LOG_ONNX_MODEL", "").strip().lower() in {"1", "true", "yes", "on"}:
+                deploy_onnx, io_json_path, io_summary = _prepare_mlflow_onnx_artifacts(file_dir)
+                if deploy_onnx is not None:
+                    _log_mlflow_artifact(self, deploy_onnx, artifact_dir)
+                if io_json_path is not None:
+                    _log_mlflow_artifact(self, io_json_path, artifact_dir)
+                if io_summary is not None:
+                    self.log_params_mlflow(
+                        {
+                            "custom17.onnx_inputs": json.dumps(io_summary["inputs"], separators=(",", ":"), ensure_ascii=False),
+                            "custom17.onnx_outputs": json.dumps(io_summary["outputs"], separators=(",", ":"), ensure_ascii=False),
+                        }
+                    )
             exp_file = getattr(args, "exp_file", None)
             if exp_file:
                 _log_mlflow_artifact(self, Path(exp_file).resolve(), artifact_dir)
@@ -320,6 +394,42 @@ def patch_trainer_for_onnx_export() -> None:
 
     trainer_module.Trainer.after_train = patched_after_train
     trainer_module._custom17_best_onnx_patch_applied = True
+
+
+def patch_occupy_mem_safeguard() -> None:
+    from yolox.utils import metric as metric_module
+    from yolox.core import trainer as trainer_module
+
+    if getattr(metric_module, "_custom17_occupy_mem_patch_applied", False):
+        return
+
+    original_occupy_mem = metric_module.occupy_mem
+
+    def patched_occupy_mem(cuda_device, mem_ratio=0.9):
+        total, used = metric_module.get_total_and_free_memory_in_Mb(cuda_device)
+        max_mem = int(total * mem_ratio)
+        block_mem = max_mem - used
+        if block_mem <= 0:
+            logger.warning(
+                "Skipping occupy_mem on cuda_device={} because computed block_mem={} MB (total={} MB, used={} MB, mem_ratio={})",
+                cuda_device,
+                block_mem,
+                total,
+                used,
+                mem_ratio,
+            )
+            return
+        try:
+            return original_occupy_mem(cuda_device, mem_ratio=mem_ratio)
+        except RuntimeError as exc:
+            if "negative dimension" in str(exc).lower():
+                logger.warning("Skipping occupy_mem after RuntimeError: {}", exc)
+                return
+            raise
+
+    metric_module.occupy_mem = patched_occupy_mem
+    trainer_module.occupy_mem = patched_occupy_mem
+    metric_module._custom17_occupy_mem_patch_applied = True
 
 
 def patch_trainer_for_balanced_resample_length() -> None:

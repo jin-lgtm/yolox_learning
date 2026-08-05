@@ -19,6 +19,7 @@ if str(YOLOX_ROOT) not in sys.path:
 from custom17.runtime_patches import (
     patch_trainer_for_balanced_resample_length,
     patch_coco_evaluator_output,
+    patch_occupy_mem_safeguard,
     patch_mlflow_logger_for_custom17,
     patch_trainer_for_mlflow_eval_metrics,
     patch_trainer_for_onnx_export,
@@ -31,6 +32,7 @@ def apply_custom17_train_args() -> None:
     parser.add_argument("--balanced-resample", action="store_true")
     parser.add_argument("--balanced-resample-seed", type=int, default=None)
     parser.add_argument("--balanced-target-count", type=int, default=None)
+    parser.add_argument("--mlflow-log-onnx-model", action="store_true")
     args, remaining = parser.parse_known_args(sys.argv[1:])
 
     if args.balanced_resample:
@@ -39,6 +41,8 @@ def apply_custom17_train_args() -> None:
         os.environ["CUSTOM17_BALANCED_RESAMPLE_SEED"] = str(args.balanced_resample_seed)
     if args.balanced_target_count is not None:
         os.environ["CUSTOM17_BALANCED_TARGET_COUNT"] = str(args.balanced_target_count)
+    if args.mlflow_log_onnx_model:
+        os.environ["CUSTOM17_MLFLOW_LOG_ONNX_MODEL"] = "1"
 
     sys.argv = [sys.argv[0], *remaining]
 
@@ -46,6 +50,7 @@ def apply_custom17_train_args() -> None:
 apply_custom17_train_args()
 patch_torch_load_for_checkpoints()
 patch_coco_evaluator_output()
+patch_occupy_mem_safeguard()
 patch_mlflow_logger_for_custom17()
 patch_trainer_for_mlflow_eval_metrics()
 patch_trainer_for_balanced_resample_length()

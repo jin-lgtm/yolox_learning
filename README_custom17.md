@@ -531,7 +531,6 @@ custom17/scripts/run_ablation_nano.sh nano_fuse_p4p5_640 \
   -d 1 \
   -b 32 \
   --fp16 \
-  -o \
   --logger mlflow \
   -c pretrained_models/yolox_nano.pth
 ```
@@ -553,7 +552,6 @@ custom17/scripts/run_all_ablation_nano.sh \
   -d 1 \
   -b 32 \
   --fp16 \
-  -o \
   --logger mlflow \
   -c pretrained_models/yolox_nano.pth
 ```
@@ -604,6 +602,7 @@ Notes:
 - evaluation output now includes both `per class AP` (`AP50:95`) and `per class AP50`
 - after training ends, `best_ckpt.pth` is automatically exported to `best_ckpt.onnx`
 - when `--logger mlflow` is used, metrics are sent to MLflow and the run uploads `best_ckpt.pth`, `best_ckpt.onnx`, `train_log.txt`, and the exp file as artifacts
+- add `--mlflow-log-onnx-model` if you also want MLflow artifacts `model.onnx` and `model_io.json`, plus recorded ONNX input/output shapes
 - MLflow also records `val/COCOAP_small`, `val/COCOAP_medium`, `val/COCOAP_large`, plus matching AR size metrics
 
 Useful MLflow environment variables:

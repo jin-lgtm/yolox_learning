@@ -29,7 +29,7 @@ Variants:
 
 Example:
   custom17/scripts/run_ablation_nano.sh nano_fuse_p4p5_640 \
-    -d 1 -b 32 --fp16 -o -c pretrained_models/yolox_nano.pth
+    -d 1 -b 32 --fp16 -c pretrained_models/yolox_nano.pth
 EOF
   exit 1
 fi
@@ -39,6 +39,20 @@ shift
 
 export CUSTOM17_ABLATION_TAG="${variant}"
 export YOLOX_MLFLOW_RUN_NAME="${YOLOX_MLFLOW_RUN_NAME:-${variant}}"
+
+filtered_args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o|--occupy)
+      printf 'Skipping occupy option for variant %s\n' "${variant}"
+      shift
+      ;;
+    *)
+      filtered_args+=("$1")
+      shift
+      ;;
+  esac
+done
 
 train_cmd=(
   uv run python custom17/scripts/train.py
@@ -115,4 +129,4 @@ printf 'Running ablation variant: %s\n' "${variant}"
 printf 'Experiment name: %s\n' "${exp_name}"
 printf 'Output dir: YOLOX_outputs/%s\n' "${exp_name}"
 
-"${train_cmd[@]}" "$@"
+"${train_cmd[@]}" "${filtered_args[@]}"
