@@ -603,6 +603,7 @@ Notes:
 - after training ends, `best_ckpt.pth` is automatically exported to `best_ckpt.onnx`
 - when `--logger mlflow` is used, metrics are sent to MLflow and the run uploads `best_ckpt.pth`, `best_ckpt.onnx`, `train_log.txt`, and the exp file as artifacts
 - add `--mlflow-log-onnx-model` if you also want MLflow artifacts `model.onnx` and `model_io.json`, plus recorded ONNX input/output shapes
+- add `--mlflow-register-onnx-model <name>` if you also want `model.onnx` logged as an MLflow ONNX model and registered in Model Registry under the given name
 - MLflow also records `val/COCOAP_small`, `val/COCOAP_medium`, `val/COCOAP_large`, plus matching AR size metrics
 
 Useful MLflow environment variables:

@@ -226,6 +226,65 @@ def _prepare_mlflow_onnx_artifacts(file_dir: Path) -> tuple[Path | None, Path | 
     return deploy_onnx, io_json_path, io_summary
 
 
+def _mlflow_dtype_from_onnx(dtype_name: str) -> str | None:
+    mapping = {
+        "FLOAT": "float",
+        "FLOAT16": "float",
+        "DOUBLE": "double",
+        "INT64": "long",
+        "INT32": "integer",
+        "INT16": "integer",
+        "INT8": "integer",
+        "UINT8": "integer",
+        "BOOL": "boolean",
+        "STRING": "string",
+    }
+    return mapping.get(dtype_name.upper())
+
+
+def _register_mlflow_onnx_model(
+    mlflow_logger,
+    onnx_path: Path,
+    registered_model_name: str,
+    io_summary: dict[str, list[dict[str, object]]] | None,
+) -> None:
+    import mlflow.onnx
+    import onnx
+    from mlflow.models.signature import ModelSignature
+    from mlflow.types import ColSpec, Schema
+
+    if not registered_model_name.strip():
+        return
+
+    onnx_model = onnx.load(str(onnx_path))
+    inputs = [
+        ColSpec(type=mapped_dtype, name=value["name"])
+        for value in (io_summary or {}).get("inputs", [])
+        if (mapped_dtype := _mlflow_dtype_from_onnx(str(value["dtype"]))) is not None
+    ]
+    outputs = [
+        ColSpec(type=mapped_dtype, name=value["name"])
+        for value in (io_summary or {}).get("outputs", [])
+        if (mapped_dtype := _mlflow_dtype_from_onnx(str(value["dtype"]))) is not None
+    ]
+    signature = None
+    if inputs or outputs:
+        signature = ModelSignature(
+            inputs=Schema(inputs) if inputs else None,
+            outputs=Schema(outputs) if outputs else None,
+        )
+
+    metadata = {"custom17_onnx_io": io_summary} if io_summary is not None else None
+    mlflow.onnx.log_model(
+        onnx_model=onnx_model,
+        artifact_path="model",
+        registered_model_name=registered_model_name.strip(),
+        signature=signature,
+        metadata=metadata,
+    )
+    logger.info("Registered MLflow ONNX model: {}", registered_model_name.strip())
+
+
 def patch_mlflow_logger_for_custom17() -> None:
     from yolox.utils import is_main_process
     import yolox.utils.mlflow_logger as mlflow_logger_module
@@ -270,6 +329,17 @@ def patch_mlflow_logger_for_custom17() -> None:
                             "custom17.onnx_outputs": json.dumps(io_summary["outputs"], separators=(",", ":"), ensure_ascii=False),
                         }
                     )
+                registered_model_name = os.getenv("CUSTOM17_MLFLOW_REGISTER_ONNX_MODEL_NAME", "").strip()
+                if deploy_onnx is not None and registered_model_name:
+                    try:
+                        _register_mlflow_onnx_model(
+                            self,
+                            deploy_onnx,
+                            registered_model_name=registered_model_name,
+                            io_summary=io_summary,
+                        )
+                    except Exception:
+                        logger.exception("Failed to register MLflow ONNX model: {}", registered_model_name)
             exp_file = getattr(args, "exp_file", None)
             if exp_file:
                 _log_mlflow_artifact(self, Path(exp_file).resolve(), artifact_dir)

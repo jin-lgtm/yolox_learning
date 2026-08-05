@@ -33,6 +33,7 @@ def apply_custom17_train_args() -> None:
     parser.add_argument("--balanced-resample-seed", type=int, default=None)
     parser.add_argument("--balanced-target-count", type=int, default=None)
     parser.add_argument("--mlflow-log-onnx-model", action="store_true")
+    parser.add_argument("--mlflow-register-onnx-model", type=str, default=None)
     args, remaining = parser.parse_known_args(sys.argv[1:])
 
     if args.balanced_resample:
@@ -43,6 +44,9 @@ def apply_custom17_train_args() -> None:
         os.environ["CUSTOM17_BALANCED_TARGET_COUNT"] = str(args.balanced_target_count)
     if args.mlflow_log_onnx_model:
         os.environ["CUSTOM17_MLFLOW_LOG_ONNX_MODEL"] = "1"
+    if args.mlflow_register_onnx_model:
+        os.environ["CUSTOM17_MLFLOW_LOG_ONNX_MODEL"] = "1"
+        os.environ["CUSTOM17_MLFLOW_REGISTER_ONNX_MODEL_NAME"] = args.mlflow_register_onnx_model
 
     sys.argv = [sys.argv[0], *remaining]
 
