@@ -184,7 +184,7 @@ def _onnx_tensor_dtype(value_info) -> str:
     return TensorProto.DataType.Name(value_info.type.tensor_type.elem_type)
 
 
-def _extract_onnx_io_summary(onnx_path: Path) -> dict[str, list[dict[str, object]]]:
+def extract_onnx_io_summary(onnx_path: Path) -> dict[str, list[dict[str, object]]]:
     import onnx
 
     model = onnx.load(str(onnx_path))
@@ -218,7 +218,7 @@ def _prepare_mlflow_onnx_artifacts(file_dir: Path) -> tuple[Path | None, Path | 
     if deploy_onnx.resolve() != source_onnx.resolve():
         shutil.copy2(source_onnx, deploy_onnx)
 
-    io_summary = _extract_onnx_io_summary(deploy_onnx)
+    io_summary = extract_onnx_io_summary(deploy_onnx)
     io_json_path = file_dir / "model_io.json"
     with io_json_path.open("w", encoding="utf-8") as fp:
         json.dump(io_summary, fp, ensure_ascii=False, indent=2)
@@ -226,44 +226,55 @@ def _prepare_mlflow_onnx_artifacts(file_dir: Path) -> tuple[Path | None, Path | 
     return deploy_onnx, io_json_path, io_summary
 
 
-def _mlflow_dtype_from_onnx(dtype_name: str) -> str | None:
+def _mlflow_dtype_from_onnx(dtype_name: str):
+    import numpy as np
+
     mapping = {
-        "FLOAT": "float",
-        "FLOAT16": "float",
-        "DOUBLE": "double",
-        "INT64": "long",
-        "INT32": "integer",
-        "INT16": "integer",
-        "INT8": "integer",
-        "UINT8": "integer",
-        "BOOL": "boolean",
-        "STRING": "string",
+        "FLOAT": np.dtype("float32"),
+        "FLOAT16": np.dtype("float16"),
+        "DOUBLE": np.dtype("float64"),
+        "INT64": np.dtype("int64"),
+        "INT32": np.dtype("int32"),
+        "INT16": np.dtype("int16"),
+        "INT8": np.dtype("int8"),
+        "UINT8": np.dtype("uint8"),
+        "BOOL": np.dtype("bool"),
+        "STRING": np.dtype("str"),
     }
     return mapping.get(dtype_name.upper())
 
 
-def _register_mlflow_onnx_model(
-    mlflow_logger,
+def _mlflow_shape_from_onnx(shape: list[object]) -> tuple[int, ...]:
+    dims = []
+    for dim in shape:
+        dim_text = str(dim)
+        dims.append(int(dim_text) if dim_text.isdigit() else -1)
+    return tuple(dims)
+
+
+def register_mlflow_onnx_model(
+    mlflow_client,
     onnx_path: Path,
     registered_model_name: str,
     io_summary: dict[str, list[dict[str, object]]] | None,
+    artifact_path: str = "model",
 ) -> None:
     import mlflow.onnx
     import onnx
     from mlflow.models.signature import ModelSignature
-    from mlflow.types import ColSpec, Schema
+    from mlflow.types.schema import Schema, TensorSpec
 
     if not registered_model_name.strip():
         return
 
     onnx_model = onnx.load(str(onnx_path))
     inputs = [
-        ColSpec(type=mapped_dtype, name=value["name"])
+        TensorSpec(dtype=mapped_dtype, shape=_mlflow_shape_from_onnx(list(value["shape"])), name=str(value["name"]))
         for value in (io_summary or {}).get("inputs", [])
         if (mapped_dtype := _mlflow_dtype_from_onnx(str(value["dtype"]))) is not None
     ]
     outputs = [
-        ColSpec(type=mapped_dtype, name=value["name"])
+        TensorSpec(dtype=mapped_dtype, shape=_mlflow_shape_from_onnx(list(value["shape"])), name=str(value["name"]))
         for value in (io_summary or {}).get("outputs", [])
         if (mapped_dtype := _mlflow_dtype_from_onnx(str(value["dtype"]))) is not None
     ]
@@ -277,7 +288,7 @@ def _register_mlflow_onnx_model(
     metadata = {"custom17_onnx_io": io_summary} if io_summary is not None else None
     mlflow.onnx.log_model(
         onnx_model=onnx_model,
-        artifact_path="model",
+        artifact_path=artifact_path,
         registered_model_name=registered_model_name.strip(),
         signature=signature,
         metadata=metadata,
@@ -332,8 +343,8 @@ def patch_mlflow_logger_for_custom17() -> None:
                 registered_model_name = os.getenv("CUSTOM17_MLFLOW_REGISTER_ONNX_MODEL_NAME", "").strip()
                 if deploy_onnx is not None and registered_model_name:
                     try:
-                        _register_mlflow_onnx_model(
-                            self,
+                        register_mlflow_onnx_model(
+                            self._ml_flow,
                             deploy_onnx,
                             registered_model_name=registered_model_name,
                             io_summary=io_summary,

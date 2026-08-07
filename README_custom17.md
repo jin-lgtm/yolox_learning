@@ -606,6 +606,29 @@ Notes:
 - add `--mlflow-register-onnx-model <name>` if you also want `model.onnx` logged as an MLflow ONNX model and registered in Model Registry under the given name
 - MLflow also records `val/COCOAP_small`, `val/COCOAP_medium`, `val/COCOAP_large`, plus matching AR size metrics
 
+To upload an existing ONNX file to MLflow without re-training:
+
+```bash
+MLFLOW_TRACKING_URI=http://your-mlflow-server:5000 \
+MLFLOW_EXPERIMENT_NAME=custom17-yolox \
+uv run python custom17/scripts/register_onnx_mlflow.py \
+  -m /path/to/best_ckpt.onnx \
+  --run-name yolox-nano-fuse-p5-640 \
+  --upload-artifacts
+```
+
+To also register that ONNX as an MLflow Model Registry entry:
+
+```bash
+MLFLOW_TRACKING_URI=http://your-mlflow-server:5000 \
+MLFLOW_EXPERIMENT_NAME=custom17-yolox \
+uv run python custom17/scripts/register_onnx_mlflow.py \
+  -m /path/to/best_ckpt.onnx \
+  --run-name yolox-nano-fuse-p5-640 \
+  --registered-model-name yolox_nano_fuse_p5_640 \
+  --upload-artifacts
+```
+
 Useful MLflow environment variables:
 
 - `MLFLOW_TRACKING_URI`
