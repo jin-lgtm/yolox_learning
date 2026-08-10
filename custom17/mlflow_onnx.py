@@ -117,5 +117,6 @@ def register_mlflow_onnx_model(
         registered_model_name=registered_model_name.strip(),
         signature=signature,
         metadata=metadata,
+        save_as_external_data=False,
     )
     logger.info("Registered MLflow ONNX model: {}", registered_model_name.strip())

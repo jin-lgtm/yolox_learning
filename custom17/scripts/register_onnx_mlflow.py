@@ -111,6 +111,7 @@ def main():
                 onnx_model=onnx.load(str(deploy_onnx)),
                 artifact_path=args.artifact_path,
                 metadata={"custom17_onnx_io": io_summary},
+                save_as_external_data=False,
             )
             logger.info("Logged MLflow ONNX model without registry name: {}", deploy_onnx)
 
