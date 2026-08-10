@@ -66,3 +66,4 @@ See `README_custom17.md` for:
 - bbox visualization and validation
 - YOLOX-Tiny fine-tuning
 - evaluation with low confidence threshold
+- MLflow logging, ONNX export, and standalone ONNX model registration

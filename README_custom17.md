@@ -617,6 +617,18 @@ uv run python custom17/scripts/register_onnx_mlflow.py \
   --upload-artifacts
 ```
 
+If the source file is already named `model.onnx`, you can pass it directly. The script now skips the copy step when source and destination are the same file:
+
+```bash
+MLFLOW_TRACKING_URI=http://your-mlflow-server:5000 \
+MLFLOW_EXPERIMENT_NAME=custom17-yolox \
+uv run python custom17/scripts/register_onnx_mlflow.py \
+  -m YOLOX_outputs/yolox_nano_fusion_custom17_nano_fuse_p5_640_model/model.onnx \
+  --run-name yolox-nano-fuse-p5-640 \
+  --registered-model-name yolox_nano_fuse_p5_640 \
+  --upload-artifacts
+```
+
 To also register that ONNX as an MLflow Model Registry entry:
 
 ```bash
@@ -636,12 +648,22 @@ Useful MLflow environment variables:
 - `YOLOX_MLFLOW_RUN_NAME`
 - `YOLOX_MLFLOW_LOG_MODEL_ARTIFACTS=1`
 
+MLflow behavior notes:
+
+- `--logger mlflow` is enough for metric logging and standard artifact logging from the custom17 patches
+- `YOLOX_MLFLOW_LOG_MODEL_ARTIFACTS=1` additionally enables upstream YOLOX pyfunc-model logging; keep it unset unless you explicitly want that path
+- `--mlflow-log-onnx-model` uploads `model.onnx` and `model_io.json` and records ONNX input/output metadata
+- `--mlflow-register-onnx-model <name>` additionally registers `model.onnx` into MLflow Model Registry
+- `register_onnx_mlflow.py` can be used later to upload/register an ONNX file without re-running training
+
 `custom17/scripts/train.py` also logs these custom params into MLflow:
 
 - `custom17.num_classes`
 - `custom17.class_names`
 - `custom17.input_override`
 - `custom17.data_source`
+- `custom17.onnx_inputs`
+- `custom17.onnx_outputs`
 
 ## 10. Evaluate with low confidence threshold for mAP
 
