@@ -77,6 +77,13 @@ def _mlflow_shape_from_onnx(shape: list[object]) -> tuple[int, ...]:
     return tuple(dims)
 
 
+def _make_tensor_spec(TensorSpec, mapped_dtype, shape: tuple[int, ...], name: str):
+    try:
+        return TensorSpec(dtype=mapped_dtype, shape=shape, name=name)
+    except TypeError:
+        return TensorSpec(type=mapped_dtype, shape=shape, name=name)
+
+
 def register_mlflow_onnx_model(
     mlflow_client,
     onnx_path: Path,
@@ -94,12 +101,22 @@ def register_mlflow_onnx_model(
 
     onnx_model = onnx.load(str(onnx_path))
     inputs = [
-        TensorSpec(dtype=mapped_dtype, shape=_mlflow_shape_from_onnx(list(value["shape"])), name=str(value["name"]))
+        _make_tensor_spec(
+            TensorSpec,
+            mapped_dtype,
+            _mlflow_shape_from_onnx(list(value["shape"])),
+            str(value["name"]),
+        )
         for value in (io_summary or {}).get("inputs", [])
         if (mapped_dtype := _mlflow_dtype_from_onnx(str(value["dtype"]))) is not None
     ]
     outputs = [
-        TensorSpec(dtype=mapped_dtype, shape=_mlflow_shape_from_onnx(list(value["shape"])), name=str(value["name"]))
+        _make_tensor_spec(
+            TensorSpec,
+            mapped_dtype,
+            _mlflow_shape_from_onnx(list(value["shape"])),
+            str(value["name"]),
+        )
         for value in (io_summary or {}).get("outputs", [])
         if (mapped_dtype := _mlflow_dtype_from_onnx(str(value["dtype"]))) is not None
     ]
