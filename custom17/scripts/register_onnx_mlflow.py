@@ -7,12 +7,20 @@ import argparse
 import json
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import mlflow
 from loguru import logger
 
-from custom17.runtime_patches import extract_onnx_io_summary, register_mlflow_onnx_model
+REPO_ROOT = Path(__file__).resolve().parents[2]
+YOLOX_ROOT = REPO_ROOT / "upstream_yolox"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(YOLOX_ROOT) not in sys.path:
+    sys.path.insert(0, str(YOLOX_ROOT))
+
+from custom17.mlflow_onnx import extract_onnx_io_summary, register_mlflow_onnx_model
 
 
 def make_parser():
