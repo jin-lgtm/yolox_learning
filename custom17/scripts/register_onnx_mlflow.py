@@ -73,7 +73,8 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     deploy_onnx = output_dir / "model.onnx"
-    shutil.copy2(source_onnx, deploy_onnx)
+    if source_onnx != deploy_onnx.resolve():
+        shutil.copy2(source_onnx, deploy_onnx)
     io_summary = extract_onnx_io_summary(deploy_onnx)
     io_json_path = output_dir / "model_io.json"
     with io_json_path.open("w", encoding="utf-8") as fp:
